@@ -244,11 +244,18 @@ def test_run_next_is_the_same_as_where_and_the_last_run_says_lesson_one_is_done(
     assert "Next:" not in out
 
 
-def test_turkish_run_points_to_the_turkish_essay_and_says_sirada(progress, tmp_path, capsys):
+def test_turkish_run_points_to_the_turkish_section_and_says_sirada(progress, tmp_path, capsys):
     out = run(capsys, "run", "03-1d-loop", "--lang", "tr", "--out", str(tmp_path))
-    assert out.splitlines()[-3:] == ["Yazıda: bölüm 3", f"  {ESSAY}-tr",
+    assert out.splitlines()[-3:] == ["Yazıda: 3. Tek boyutlu döngü", f"  {ESSAY}-tr#3-tek-boyutlu-dng",
                                      "Sırada: 01-fusion (iki ölçümü birleştir)"]
     assert "Next" not in out and "In the essay" not in out
+
+
+@pytest.mark.parametrize("e", registry.entries(), ids=lambda e: e.id)
+def test_every_turkish_run_links_its_turkish_heading(e, progress, tmp_path, capsys):
+    lines = run(capsys, "run", e.id, "--lang", "tr", "--out", str(tmp_path)).splitlines()
+    i = lines.index(f"Yazıda: {e.heading_tr}")
+    assert lines[i + 1] == f"  {registry.ESSAY_URL_TR}#{registry.anchor(e.heading_tr)}"
 
 
 # --- Turkish -----------------------------------------------------------------------------
@@ -287,6 +294,19 @@ def test_anchor_follows_the_site_rule():
     assert registry.anchor("14. Is the filter honest? The NIS test") == "14-is-the-filter-honest-the-nis-test"
     assert registry.anchor("8. The covariance matrix P") == "8-the-covariance-matrix-p"
     assert registry.anchor("a  -- b_c") == "a-b_c"
+
+
+def test_anchor_drops_turkish_letters_like_the_site():
+    assert registry.anchor("1. İki ölçümü birleştirmek") == "1-iki-lm-birletirmek"      # İ -> i, the rest dropped
+    assert registry.anchor("5. Hız neden durumun içinde olmalı?") == "5-hz-neden-durumun-iinde-olmal"
+    assert registry.anchor("13. Q ve R'yi ayarlamak") == "13-q-ve-ryi-ayarlamak"
+    assert registry.anchor("14. Filtre dürüst mü? NIS testi") == "14-filtre-drst-m-nis-testi"
+
+
+def test_turkish_headings_have_the_english_section_numbers():
+    for e in registry.entries():
+        assert e.heading_tr.split(".")[0] == e.heading.split(".")[0], e.id
+        assert e.heading_tr != e.heading
 
 
 @pytest.mark.parametrize("sid", list(sims.SIMS))

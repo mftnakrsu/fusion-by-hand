@@ -20,7 +20,7 @@ _TEXT = {
         "progress": "Ders {n} · çalıştırılan simülasyon: {done} / {total}.",
         "next": "Sırada: {id} ({title})", "done": "Ders {n} bitti.", "coming": "Ders {n} ({name}) yazılıyor.",
         "wrote": "yazıldı:", "ignored": "not: {id} şu seçenekleri kullanmaz: {flags}",
-        "essay": "Yazıda: bölüm {number}",
+        "essay": "Yazıda: {heading}",
     },
 }
 LANGS = tuple(_TEXT)
@@ -156,12 +156,9 @@ def cmd_run(args) -> None:
     for key, value in result.summary.items():
         print(f"  {key:<{width}}  {_fmt(value, args.lang)}")
     print(f"{text['wrote']} {png}, {table}")
-    if args.lang == "en":                                   # the Turkish essay has its own headings: no anchor
-        print(text["essay"].format(heading=entry.heading))
-        print(f"  {registry.ESSAY_URL}#{registry.anchor(entry.heading)}")
-    else:
-        print(text["essay"].format(number=registry.section_number(entry)))
-        print(f"  {registry.ESSAY_URL_TR}")
+    heading, url = (entry.heading, registry.ESSAY_URL) if args.lang == "en" else (entry.heading_tr, registry.ESSAY_URL_TR)
+    print(text["essay"].format(heading=heading))
+    print(f"  {url}#{registry.anchor(heading)}")
     lesson, _, nxt = _first_unrun(set(progress.load()))
     print(_next_line(args.lang, lesson, nxt))
 
