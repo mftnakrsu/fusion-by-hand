@@ -5,7 +5,7 @@ import math
 import sys
 from pathlib import Path
 
-from . import export, progress, registry, sims
+from . import export, export2, progress, registry, sims
 
 _TEXT = {
     "en": {
@@ -24,6 +24,7 @@ _TEXT = {
     },
 }
 LANGS = tuple(_TEXT)
+EXPORTS = {1: export, 2: export2}                           # `fbh export --lesson n` writes EXPORTS[n].FILES
 
 
 # --- argument types ----------------------------------------------------------------------
@@ -44,6 +45,14 @@ def _q(text):
 
 def _r(text):
     return _float(text, "r must be more than 0", lambda v: v > 0)
+
+
+def _sigma_r(text):
+    return _float(text, "sigma-r must be more than 0", lambda v: v > 0)
+
+
+def _sigma_theta(text):
+    return _float(text, "sigma-theta must be more than 0", lambda v: v > 0)
 
 
 def _seed(text):
@@ -69,16 +78,21 @@ def _gap(text):
 
 # --- output ------------------------------------------------------------------------------
 
-def _fmt(value, lang: str) -> str:
-    """A summary value for the terminal: at most 3 decimals, no trailing zeros, comma in Turkish."""
+def _fmt(value, lang: str, decimals: int = 3) -> str:
+    """A summary value for the terminal: at most `decimals` decimals, no trailing zeros, comma in Turkish.
+
+    A value under 0.01 keeps two significant digits instead (a Jacobian's bearing row reads [-0.0016, 0.0012],
+    not [-0.002, 0.001]); one under 1e-9 is rounding noise and prints 0.
+    """
     if value is None:
         return _TEXT[lang]["none"]
     if isinstance(value, float):
-        s = f"{round(value, 3):.3f}".rstrip("0").rstrip(".")
+        digits = 1 - math.floor(math.log10(abs(value))) if 1e-9 <= abs(value) < 0.01 else decimals
+        s = f"{round(value, digits):.{digits}f}".rstrip("0").rstrip(".")
         s = "0" if s in ("", "-0") else s
         return s.replace(".", ",") if lang == "tr" else s
     if isinstance(value, (list, tuple)):                    # Turkish: "; " so that "2,5, 1" cannot be misread
-        return "[" + ("; " if lang == "tr" else ", ").join(_fmt(v, lang) for v in value) + "]"
+        return "[" + ("; " if lang == "tr" else ", ").join(_fmt(v, lang, decimals) for v in value) + "]"
     return str(value)
 
 
@@ -91,22 +105,28 @@ def _write_csv(table: list[dict], path: Path) -> None:
         writer.writerows({k: cell(v) for k, v in row.items()} for row in table)
 
 
-def _first_unrun(done: set[str]):
-    """(lesson, how many of it are run, the first one that is not or None) for the lesson you are in."""
-    lessons = [lesson for lesson in registry.LESSONS if lesson.entries]
-    for lesson in lessons:
-        todo = [e for e in lesson.entries if e.id not in done]
-        if todo:
-            return lesson, len(lesson.entries) - len(todo), todo[0]
-    return lessons[-1], len(lessons[-1].entries), None
+def _current_lesson(run: list[str]):
+    """The lesson you are in: the one of the last simulation you ran for the first time (lesson 1 before any)."""
+    known = [sid for sid in run if sid in {e.id for e in registry.entries()}]
+    return registry.lesson_of(known[-1]) if known else registry.LESSONS[0]
 
 
-def _next_line(lang: str, lesson, nxt) -> str:
-    """"Next: <id> (<title>)", or, when the lesson is finished, that it is and what comes after it."""
+def _next(lesson, done: set[str]):
+    """What comes after a simulation of `lesson`: its first one not run yet; once it is done, the first one not
+    run in a later lesson; None when this lesson and every later one are done."""
+    later = [e for l in registry.LESSONS if l.number >= lesson.number for e in l.entries]
+    return next((e for e in later if e.id not in done), None)
+
+
+def _next_line(lang: str, lesson, done: set[str]) -> str:
+    """"Next: <id> (<title>)" while `lesson` has a simulation left; then that it is done and what comes after it."""
     text, i = _TEXT[lang], 0 if lang == "en" else 1
-    if nxt is not None:
+    nxt = _next(lesson, done)
+    if nxt is not None and nxt in lesson.entries:
         return text["next"].format(id=nxt.id, title=nxt.title[i])
     line = text["done"].format(n=lesson.number)
+    if nxt is not None:
+        return f"{line} {text['next'].format(id=nxt.id, title=nxt.title[i])}"
     coming = [l for l in registry.LESSONS if l.number > lesson.number and not l.entries]
     return line + (" " + text["coming"].format(n=coming[0].number, name=coming[0].name[i]) if coming else "")
 
@@ -115,34 +135,40 @@ def _next_line(lang: str, lesson, nxt) -> str:
 
 def cmd_list(args) -> None:
     text, i = _TEXT[args.lang], 0 if args.lang == "en" else 1
-    done = set(progress.load())
-    nxt = next((e.id for e in registry.entries() if e.id not in done), None)
+    run = progress.load()
+    done = set(run)
+    nxt = _next(_current_lesson(run), done)
     width = max(len(e.id) for e in registry.entries())
     for lesson in registry.LESSONS:
         head = text["lesson"].format(n=lesson.number, name=lesson.name[i])
         print(head if lesson.entries else f"{head} {text['writing']}")
         for e in lesson.entries:
-            mark = "✓" if e.id in done else "▶" if e.id == nxt else " "
+            mark = "✓" if e.id in done else "▶" if e == nxt else " "
             print(f"  {mark} {e.id:<{width}}  {e.title[i]}")
 
 
 def cmd_where(args) -> None:
     text = _TEXT[args.lang]
-    lesson, n_done, nxt = _first_unrun(set(progress.load()))
-    head = text["progress"].format(n=lesson.number, done=n_done, total=len(lesson.entries))
-    print(f"{head} {_next_line(args.lang, lesson, nxt)}" + ("." if nxt is not None else ""))
+    run = progress.load()
+    lesson, done = _current_lesson(run), set(run)
+    head = text["progress"].format(n=lesson.number, done=sum(e.id in done for e in lesson.entries),
+                                   total=len(lesson.entries))
+    line = _next_line(args.lang, lesson, done)
+    print(f"{head} {line}" + ("" if line.endswith(".") else "."))
 
 
 def cmd_run(args) -> None:
     text, i = _TEXT[args.lang], 0 if args.lang == "en" else 1
     entry = registry.entry(args.id)
-    given = {"q": args.q, "r": args.r, "gap": args.gap, "seed": args.seed}
-    unused = [f"--{name}" for name, value in given.items() if value is not None and name not in entry.options]
+    given = {"q": args.q, "r": args.r, "gap": args.gap, "seed": args.seed, "sigma_r": args.sigma_r,
+             "sigma_theta": args.sigma_theta}
+    unused = [f"--{name.replace('_', '-')}" for name, value in given.items()
+              if value is not None and name not in entry.options]
     if unused:
         print(text["ignored"].format(id=entry.id, flags=", ".join(unused)), file=sys.stderr)
 
     try:
-        result = sims.SIMS[entry.id](sims.Options(q=args.q, r=args.r, gap=args.gap, seed=args.seed, lang=args.lang))
+        result = sims.SIMS[entry.id](sims.Options(**given, lang=args.lang))
     except sims.OptionError as e:
         raise UsageError(f"{entry.id}: {e}") from None
     out = Path(args.out)
@@ -154,17 +180,16 @@ def cmd_run(args) -> None:
     print(f"{entry.id} · {entry.title[i]}")
     width = max(len(key) for key in result.summary)
     for key, value in result.summary.items():
-        print(f"  {key:<{width}}  {_fmt(value, args.lang)}")
+        print(f"  {key:<{width}}  {_fmt(value, args.lang, result.digits.get(key, 3))}")
     print(f"{text['wrote']} {png}, {table}")
-    heading, url = (entry.heading, registry.ESSAY_URL) if args.lang == "en" else (entry.heading_tr, registry.ESSAY_URL_TR)
+    heading = (entry.heading, entry.heading_tr)[i]
     print(text["essay"].format(heading=heading))
-    print(f"  {url}#{registry.anchor(heading)}")
-    lesson, _, nxt = _first_unrun(set(progress.load()))
-    print(_next_line(args.lang, lesson, nxt))
+    print(f"  {registry.lesson_of(entry.id).essay[i]}#{registry.anchor(heading)}")
+    print(_next_line(args.lang, registry.lesson_of(entry.id), set(progress.load())))
 
 
 def cmd_export(args) -> None:
-    for path in export.write_all(args.dir):
+    for path in EXPORTS[args.lesson].write_all(args.dir):
         print(f"wrote {path} ({path.stat().st_size / 1000:.0f} kB)")
 
 
@@ -184,12 +209,17 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--q", type=_q, help="process noise Q (the simulation's own default if left out)")
     run.add_argument("--r", type=_r, help="measurement noise R")
     run.add_argument("--gap", type=_gap, metavar="A:B", help="frames A to B have no measurement, for example 20:27")
+    run.add_argument("--sigma-r", type=_sigma_r, help="the radar's range noise, in metres")
+    run.add_argument("--sigma-theta", type=_sigma_theta, help="the radar's bearing noise, in radians")
     run.add_argument("--seed", type=_seed, help="random seed")
     run.add_argument("--out", default="out", help="folder for <id>.png and <id>.csv (default out)")
     run.set_defaults(func=cmd_run)
 
     exp = sub.add_parser("export", help="write the JSON the essay's browser figures use")
-    exp.add_argument("dir", help="folder to write tracking.json, kf-cases.json, derivative.json, covariance.json, nis.json to")
+    exp.add_argument("dir", help="folder to write the files to (created if needed)")
+    exp.add_argument("--lesson", type=int, choices=list(EXPORTS), default=1,
+                     help="; ".join(f"{n} writes {', '.join(module.FILES)}" for n, module in EXPORTS.items())
+                     + " (default 1)")
     exp.set_defaults(func=cmd_export)
     return parser
 

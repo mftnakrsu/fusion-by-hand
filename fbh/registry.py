@@ -1,13 +1,11 @@
 """The lessons and their simulations: ids, short titles (EN, TR), essay sections and the options each one reads.
 
 `list` and `where` are written from this, and a test keeps it in step with `sims.SIMS` and the README.
-Lesson 2 is announced but has no simulations yet.
 """
 import re
 from dataclasses import dataclass
 
-ESSAY_URL = "https://www.mefby.com/essays/fusion-01-kalman-filter"
-ESSAY_URL_TR = ESSAY_URL + "-tr"        # the Turkish essay, with its own Turkish headings
+ESSAYS = "https://www.mefby.com/essays/"
 
 
 @dataclass(frozen=True)
@@ -16,18 +14,20 @@ class Entry:
     title: tuple[str, str]               # (English, Turkish), as printed by `fbh list`
     heading: str                         # the essay heading the simulation belongs to
     heading_tr: str                      # the same heading in the Turkish essay
-    options: tuple[str, ...]             # which of --q --r --gap --seed the simulation reads
+    options: tuple[str, ...]             # which of q, r, gap, seed, sigma_r, sigma_theta the simulation reads
 
 
 @dataclass(frozen=True)
 class Lesson:
     number: int
     name: tuple[str, str]
+    essay: tuple[str, str]               # (English, Turkish) URL of the lesson's essay
     entries: tuple[Entry, ...]           # empty: still being written
 
 
 LESSONS = (
-    Lesson(1, ("Kalman filter", "Kalman filtresi"), (
+    Lesson(1, ("Kalman filter", "Kalman filtresi"),
+           (ESSAYS + "fusion-01-kalman-filter", ESSAYS + "fusion-01-kalman-filter-tr"), (
         Entry("01-fusion", ("fuse two measurements", "iki ölçümü birleştir"),
               "1. Fusing two measurements", "1. İki ölçümü birleştirmek", ()),
         Entry("03-1d-loop", ("predict + update, a measurement gap", "tahmin + güncelleme, bir ölçüm boşluğu"),
@@ -45,7 +45,21 @@ LESSONS = (
               "14. Is the filter honest? The NIS test", "14. Filtre dürüst mü? NIS testi",
               ("q", "r", "gap", "seed")),
     )),
-    Lesson(2, ("EKF", "EKF"), ()),
+    Lesson(2, ("EKF", "EKF"),
+           (ESSAYS + "fusion-02-extended-kalman-filter", ESSAYS + "fusion-02-extended-kalman-filter-tr"), (
+        Entry("ekf-02-tangent", ("a belief through a curve, and its tangent", "bir inanç eğriden geçiyor, yanında teğeti"),
+              "2. The tangent line", "2. Teğet doğrusu", ()),
+        Entry("ekf-03-range-only", ("one EKF update with the range alone", "yalnız menzille bir EKF güncellemesi"),
+              "3. One update by hand", "3. Elle bir güncelleme", ("sigma_r",)),
+        Entry("ekf-05-radar-update", ("one update with range and bearing", "menzil ve kerterizle bir güncelleme"),
+              "5. One radar update by hand", "5. Elle bir radar güncellemesi", ("sigma_r", "sigma_theta")),
+        Entry("ekf-07-flyby", ("tracking a fly-by with the EKF", "bir geçişi EKF ile takip etmek"),
+              "7. Python from scratch", "7. Python ile sıfırdan", ("q", "sigma_r", "sigma_theta", "seed")),
+        Entry("ekf-08-wrap", ("the bearing wraps: with the fix and without", "kerteriz başa sarıyor: düzeltmeli ve düzeltmesiz"),
+              "8. The angle wraps", "8. Açı başa sarınca", ("q", "sigma_r", "sigma_theta", "seed")),
+        Entry("ekf-09-consistency", ("where the tangent fails: four cases", "teğet nerede yetmez: dört durum"),
+              "9. Where the tangent fails", "9. Teğet nerede yetmez?", ("seed",)),
+    )),
 )
 
 
@@ -57,6 +71,11 @@ def entry(sid: str) -> Entry:
     return next(e for e in entries() if e.id == sid)
 
 
+def lesson_of(sid: str) -> Lesson:
+    """The lesson simulation `sid` belongs to."""
+    return next(lesson for lesson in LESSONS if any(e.id == sid for e in lesson.entries))
+
+
 def anchor(heading: str) -> str:
     """The id the site gives a `##` heading: lowercase, only [a-z0-9_ -], spaces to '-', '-' runs collapsed.
 
@@ -65,4 +84,3 @@ def anchor(heading: str) -> str:
     """
     kept = re.sub(r"[^a-z0-9_ -]", "", heading.lower())
     return re.sub(r"-+", "-", kept.replace(" ", "-"))
-

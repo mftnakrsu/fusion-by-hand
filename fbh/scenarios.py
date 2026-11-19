@@ -51,3 +51,38 @@ def model_truth(seed: int = 1, n: int = 400, q: float = 0.01, maneuver: int | No
         v.append(float(x[1]))
     return {"p": p, "v": v, "noise": noise.tolist(), "gap": None if gap is None else [int(gap[0]), int(gap[1])],
             "maneuver": maneuver, "x0": x0, "P0": P0, "q": q}
+
+
+# --- lesson 2: a radar at the origin, one scan per second -----------------------------
+
+def flyby(seed: int = 0, n: int = 60) -> dict:
+    """A UAV that flies past the radar: straight and level at 20 m/s, on the line 400 m north of it.
+
+    Scans are 1-based and one second apart: p_k = (-600 + 20 k, 400). Scan 30 is the closest point,
+    (0, 400), and scan 45 is at (300, 400), the point of the essay's hand calculation. `noise` holds
+    one unit-normal [range, bearing] pair per scan; a simulation scales it by the radar's sigmas, so
+    changing a sigma rescales the very same draws. The filter starts about one sigma off: 20 m in
+    each coordinate, 4 and 3 m/s in the velocity, and P0 admits it.
+    """
+    return {
+        "p": [[-600.0 + 20.0 * k, 400.0] for k in range(1, n + 1)],
+        "v": [20.0, 0.0],
+        "noise": np.random.default_rng(seed).standard_normal((n, 2)).tolist(),
+        "x0": [-580.0, 420.0, 16.0, 3.0],
+        "P0": np.diag([900.0, 900.0, 25.0, 25.0]).tolist(),
+    }
+
+
+def crossing(seed: int = 0, n: int = 30) -> dict:
+    """A UAV that crosses the line due west of the radar, where the bearing jumps between +pi and -pi.
+
+    p_k = (-200 - 15 k, 52.5 - 5 k): the target passes from north of that line to south of it between
+    scans 10 and 11, and scans 9 to 12 are all within 0.03 rad of it. Same keys as `flyby`.
+    """
+    return {
+        "p": [[-200.0 - 15.0 * k, 52.5 - 5.0 * k] for k in range(1, n + 1)],
+        "v": [-15.0, -5.0],
+        "noise": np.random.default_rng(seed).standard_normal((n, 2)).tolist(),
+        "x0": [-190.0, 65.0, -12.0, -3.0],
+        "P0": np.diag([900.0, 900.0, 25.0, 25.0]).tolist(),
+    }
