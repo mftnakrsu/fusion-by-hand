@@ -36,12 +36,12 @@ def model_truth(seed: int = 1, n: int = 400, q: float = 0.01, maneuver: int | No
     With `maneuver` set, the velocity also jumps by `dv` px/frame at that frame; the random draws
     stay the same, so that truth differs from the calm one only by that deterministic step.
     """
-    F, _, Q, _ = cv_model(1.0, q, 1.0)
+    F, _, Q_unit, _ = cv_model(1.0, 1.0, 1.0)
     x0, P0 = [200, 7], [[16, 0], [0, 9]]
     rng = np.random.default_rng(seed)
     start, w, noise = rng.standard_normal(2), rng.standard_normal((n, 2)), rng.standard_normal(n)
     x = np.array(x0, dtype=float) + np.linalg.cholesky(np.array(P0, dtype=float)) @ start
-    L = np.linalg.cholesky(Q)
+    L = np.sqrt(q) * np.linalg.cholesky(Q_unit)                # Cholesky of Q(q) = q Q(1), also fine for q = 0
     p, v = [], []
     for k in range(1, n + 1):
         x = F @ x + L @ w[k - 1]

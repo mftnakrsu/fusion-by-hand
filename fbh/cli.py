@@ -10,15 +10,17 @@ from . import export, progress, registry, sims
 _TEXT = {
     "en": {
         "lesson": "LESSON {n} · {name}", "writing": "(writing)", "none": "none",
-        "where": "Lesson {n} · {done} of {total} simulations run. Next: {id} ({title}).",
-        "where_done": "Lesson {n} · {done} of {total} simulations run. Lesson {n} is complete.",
+        "progress": "Lesson {n} · {done} of {total} simulations run.",
+        "next": "Next: {id} ({title})", "done": "Lesson {n} is done.", "coming": "Lesson {n} ({name}) is being written.",
         "wrote": "wrote", "ignored": "note: {id} does not use {flags}",
+        "essay": "In the essay: {heading}",
     },
     "tr": {
         "lesson": "DERS {n} · {name}", "writing": "(yazılıyor)", "none": "yok",
-        "where": "Ders {n} · çalıştırılan simülasyon: {done} / {total}. Sıradaki: {id} ({title}).",
-        "where_done": "Ders {n} · çalıştırılan simülasyon: {done} / {total}. Ders {n} tamam.",
+        "progress": "Ders {n} · çalıştırılan simülasyon: {done} / {total}.",
+        "next": "Sırada: {id} ({title})", "done": "Ders {n} bitti.", "coming": "Ders {n} ({name}) yazılıyor.",
         "wrote": "yazıldı:", "ignored": "not: {id} şu seçenekleri kullanmaz: {flags}",
+        "essay": "Yazıda: bölüm {number}",
     },
 }
 LANGS = tuple(_TEXT)
@@ -55,13 +57,11 @@ def _seed(text):
 
 
 def _gap(text):
-    """'A:B' (frames A to B, 1-based, inclusive) or 'none'."""
-    if text.lower() == "none":
-        return None
+    """'A:B': frames A to B, 1-based, inclusive. Whether it fits the run is for the simulation to say."""
     try:
         a, b = (int(part) for part in text.split(":"))
     except ValueError:
-        raise argparse.ArgumentTypeError(f"expected A:B (for example 20:27) or none, got {text!r}") from None
+        raise argparse.ArgumentTypeError(f"expected A:B (for example 20:27), got {text!r}") from None
     if not 1 <= a <= b:
         raise argparse.ArgumentTypeError(f"need 1 <= A <= B, got {text}")
     return (a, b)
@@ -101,6 +101,16 @@ def _first_unrun(done: set[str]):
     return lessons[-1], len(lessons[-1].entries), None
 
 
+def _next_line(lang: str, lesson, nxt) -> str:
+    """"Next: <id> (<title>)", or, when the lesson is finished, that it is and what comes after it."""
+    text, i = _TEXT[lang], 0 if lang == "en" else 1
+    if nxt is not None:
+        return text["next"].format(id=nxt.id, title=nxt.title[i])
+    line = text["done"].format(n=lesson.number)
+    coming = [l for l in registry.LESSONS if l.number > lesson.number and not l.entries]
+    return line + (" " + text["coming"].format(n=coming[0].number, name=coming[0].name[i]) if coming else "")
+
+
 # --- commands ----------------------------------------------------------------------------
 
 def cmd_list(args) -> None:
@@ -117,13 +127,10 @@ def cmd_list(args) -> None:
 
 
 def cmd_where(args) -> None:
-    text, i = _TEXT[args.lang], 0 if args.lang == "en" else 1
+    text = _TEXT[args.lang]
     lesson, n_done, nxt = _first_unrun(set(progress.load()))
-    fields = {"n": lesson.number, "done": n_done, "total": len(lesson.entries)}
-    if nxt is None:
-        print(text["where_done"].format(**fields))
-    else:
-        print(text["where"].format(**fields, id=nxt.id, title=nxt.title[i]))
+    head = text["progress"].format(n=lesson.number, done=n_done, total=len(lesson.entries))
+    print(f"{head} {_next_line(args.lang, lesson, nxt)}" + ("." if nxt is not None else ""))
 
 
 def cmd_run(args) -> None:
@@ -134,7 +141,10 @@ def cmd_run(args) -> None:
     if unused:
         print(text["ignored"].format(id=entry.id, flags=", ".join(unused)), file=sys.stderr)
 
-    result = sims.SIMS[entry.id](sims.Options(q=args.q, r=args.r, gap=args.gap, seed=args.seed, lang=args.lang))
+    try:
+        result = sims.SIMS[entry.id](sims.Options(q=args.q, r=args.r, gap=args.gap, seed=args.seed, lang=args.lang))
+    except sims.OptionError as e:
+        raise UsageError(f"{entry.id}: {e}") from None
     out = Path(args.out)
     png = result.plot(out, args.lang)
     table = out / f"{entry.id}.csv"
@@ -146,6 +156,14 @@ def cmd_run(args) -> None:
     for key, value in result.summary.items():
         print(f"  {key:<{width}}  {_fmt(value, args.lang)}")
     print(f"{text['wrote']} {png}, {table}")
+    if args.lang == "en":                                   # the Turkish essay has its own headings: no anchor
+        print(text["essay"].format(heading=entry.heading))
+        print(f"  {registry.ESSAY_URL}#{registry.anchor(entry.heading)}")
+    else:
+        print(text["essay"].format(number=registry.section_number(entry)))
+        print(f"  {registry.ESSAY_URL_TR}")
+    lesson, _, nxt = _first_unrun(set(progress.load()))
+    print(_next_line(args.lang, lesson, nxt))
 
 
 def cmd_export(args) -> None:
@@ -168,7 +186,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("id", choices=list(sims.SIMS), metavar="id", help="one of: " + ", ".join(sims.SIMS))
     run.add_argument("--q", type=_q, help="process noise Q (the simulation's own default if left out)")
     run.add_argument("--r", type=_r, help="measurement noise R")
-    run.add_argument("--gap", type=_gap, metavar="A:B|none", help="frames without a measurement, for example 20:27")
+    run.add_argument("--gap", type=_gap, metavar="A:B", help="frames A to B have no measurement, for example 20:27")
     run.add_argument("--seed", type=_seed, help="random seed")
     run.add_argument("--out", default="out", help="folder for <id>.png and <id>.csv (default out)")
     run.set_defaults(func=cmd_run)
@@ -179,9 +197,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+class UsageError(Exception):
+    """A request that cannot be carried out; shown like an argparse error (one line, exit status 2)."""
+
+
 def main(argv=None) -> int:
-    args = _parser().parse_args(argv)
-    args.func(args)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    try:
+        args.func(args)
+    except UsageError as e:
+        parser.error(str(e))
+    except OSError as e:                                    # a folder that cannot be written, ...
+        parser.error(f"{e.strerror}: {e.filename}" if e.filename else str(e))
     return 0
 
 

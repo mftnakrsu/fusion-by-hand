@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 ESSAY_URL = "https://www.mefby.com/essays/fusion-01-kalman-filter"
+ESSAY_URL_TR = ESSAY_URL + "-tr"        # the Turkish essay has its own headings, so it is linked without an anchor
 
 
 @dataclass(frozen=True)
@@ -57,3 +58,8 @@ def anchor(heading: str) -> str:
     """The id the site gives a `##` heading: lowercase, only [a-z0-9_ -], spaces to '-', '-' runs collapsed."""
     kept = re.sub(r"[^a-z0-9_ -]", "", heading.lower())
     return re.sub(r"-+", "-", kept.replace(" ", "-"))
+
+
+def section_number(e: Entry) -> int:
+    """The essay section number, from its heading ("12. Python from scratch" -> 12)."""
+    return int(e.heading.split(".")[0])

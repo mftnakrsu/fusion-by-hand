@@ -54,8 +54,10 @@ def test_where_from_nothing_to_everything(progress, tmp_path, capsys):
     assert run(capsys, "where") == "Lesson 1 · 0 of 7 simulations run. Next: 01-fusion (fuse two measurements).\n"
     for sid in sims.SIMS:
         run(capsys, "run", sid, "--out", str(tmp_path))
-    done = run(capsys, "where")
-    assert done.startswith("Lesson 1 · 7 of 7 simulations run.") and "Next:" not in done and "complete" in done
+    assert run(capsys, "where") == ("Lesson 1 · 7 of 7 simulations run. Lesson 1 is done. "
+                                    "Lesson 2 (EKF) is being written.\n")
+    assert run(capsys, "where", "--lang", "tr") == ("Ders 1 · çalıştırılan simülasyon: 7 / 7. Ders 1 bitti. "
+                                                    "Ders 2 (EKF) yazılıyor.\n")
     assert "▶" not in run(capsys, "list") and run(capsys, "list").count("✓") == 7
 
 
@@ -78,17 +80,41 @@ def test_progress_creates_its_folder(tmp_path, monkeypatch, capsys):
     assert json.loads((tmp_path / "deep" / "er" / "p.json").read_text()) == {"run": ["01-fusion"]}
 
 
-def test_a_broken_progress_file_counts_as_nothing_run(progress, capsys):
+def test_a_broken_progress_file_warns_on_stderr_and_counts_as_nothing_run(progress, tmp_path, capsys):
     progress.write_text("{ not json")
-    assert "0 of 7" in run(capsys, "where")
+    main(["where"])
+    cap = capsys.readouterr()
+    assert "0 of 7" in cap.out
+    assert cap.err.count("\n") == 1 and "warning" in cap.err and str(progress) in cap.err      # one line, names the file
+    main(["list"])
+    assert "warning" in capsys.readouterr().err
+    assert progress.read_text() == "{ not json"                                  # reading never overwrites it
+    main(["run", "01-fusion", "--out", str(tmp_path)])                           # a run rewrites it, after saying so
+    assert capsys.readouterr().err.count("warning") == 1
+    assert json.loads(progress.read_text()) == {"run": ["01-fusion"]}
+    main(["where"])
+    assert capsys.readouterr().err == ""
+    for bad in ('{"run": "01-fusion"}', "[]", ""):                                # valid JSON of the wrong shape, empty file
+        progress.write_text(bad)
+        main(["where"])
+        assert "warning" in capsys.readouterr().err, bad
 
 
-def test_a_failed_run_is_not_recorded(progress, tmp_path, capsys):
+def test_a_missing_progress_file_is_not_a_warning(progress, capsys):
+    main(["where"])
+    assert capsys.readouterr().err == ""
+
+
+def test_an_unwritable_out_is_a_readable_usage_error_and_not_recorded(progress, tmp_path, capsys):
     blocker = tmp_path / "file"
     blocker.write_text("x")
-    with pytest.raises(OSError):
-        main(["run", "01-fusion", "--out", str(blocker / "sub")])
-    assert not progress.exists() or "01-fusion" not in progress.read_text()
+    for argv in (["run", "01-fusion", "--out", str(blocker / "sub")], ["export", str(blocker / "sub")]):
+        with pytest.raises(SystemExit) as e:
+            main(argv)
+        assert e.value.code == 2
+        err = capsys.readouterr().err
+        assert "Traceback" not in err and str(blocker) in err and "error" in err
+    assert not progress.exists()
 
 
 # --- what run writes and prints ----------------------------------------------------------
@@ -123,7 +149,7 @@ def test_run_options_reach_the_simulation(progress, tmp_path, capsys):
     assert re.search(r"^\s+Q\s+2$", out, re.M) and re.search(r"^\s+R\s+3$", out, re.M)
     out = run(capsys, "run", "14-nis", "--gap", "20:27", "--seed", "2", "--out", str(tmp_path))
     assert re.search(r"^\s+n\s+392$", out, re.M)
-    out = run(capsys, "run", "14-nis", "--gap", "none", "--out", str(tmp_path))
+    out = run(capsys, "run", "14-nis", "--out", str(tmp_path))                  # no --gap: no gap
     assert re.search(r"^\s+n\s+400$", out, re.M)
 
 
@@ -137,7 +163,7 @@ def test_run_ignored_options_are_named_on_stderr(progress, tmp_path, capsys):
 
 @pytest.mark.parametrize("argv", [
     ["run", "99-nope"], ["run", "03-1d-loop", "--gap", "5"], ["run", "03-1d-loop", "--gap", "9:3"],
-    ["run", "03-1d-loop", "--gap", "0:3"], ["run", "03-1d-loop", "--r", "0"], ["run", "03-1d-loop", "--q", "-1"],
+    ["run", "03-1d-loop", "--gap", "0:3"], ["run", "03-1d-loop", "--gap", "none"], ["run", "03-1d-loop", "--r", "0"], ["run", "03-1d-loop", "--q", "-1"],
     ["run", "03-1d-loop", "--seed", "-1"], ["run", "03-1d-loop", "--lang", "de"], ["run"], ["nothing"], [],
 ])
 def test_bad_arguments_exit_with_a_usage_error(argv, progress, capsys):
@@ -145,6 +171,84 @@ def test_bad_arguments_exit_with_a_usage_error(argv, progress, capsys):
         main(argv)
     assert e.value.code == 2
     assert "Traceback" not in capsys.readouterr().err
+
+
+# --- gaps that do not fit ----------------------------------------------------------------
+
+@pytest.mark.parametrize("sid, gap", [
+    ("14-nis", "195:230"),          # hides the whole maneuver window 200..219: mean of an empty slice before
+    ("14-nis", "1:400"),            # no measurement at all
+    ("14-nis", "390:410"),          # beyond the 400 frames
+    ("14-nis", "10:400"),           # fewer than the 20 measurements the 20-frame average needs
+    ("13-q-r-tradeoff", "1:60"),    # no measurement at all
+    ("13-q-r-tradeoff", "50:70"),   # beyond the 60 frames
+])
+def test_gaps_that_do_not_fit_are_usage_errors_without_traceback_or_warning(sid, gap, progress, tmp_path, capsys):
+    with pytest.raises(SystemExit) as e:                    # pytest runs with -W error: a RuntimeWarning would fail here
+        main(["run", sid, "--gap", gap, "--out", str(tmp_path)])
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert "error" in err and sid in err and gap.split(":")[0] in err and "Traceback" not in err
+    assert not (tmp_path / f"{sid}.png").exists() and not progress.exists()
+
+
+@pytest.mark.parametrize("sid, gap", [
+    ("14-nis", "1:199"), ("14-nis", "230:400"), ("14-nis", "100:205"), ("14-nis", "381:400"), ("14-nis", "1:1"),
+    ("13-q-r-tradeoff", "1:59"), ("13-q-r-tradeoff", "36:60"), ("13-q-r-tradeoff", "20:27"),
+])
+def test_gaps_that_fit_run_without_warnings(sid, gap, progress, tmp_path, capsys):
+    run(capsys, "run", sid, "--gap", gap, "--out", str(tmp_path))
+    assert (tmp_path / f"{sid}.png").exists()
+
+
+def test_a_gap_on_a_simulation_that_has_no_use_for_it_is_only_noted(progress, tmp_path, capsys):
+    main(["run", "03-1d-loop", "--gap", "195:230", "--out", str(tmp_path)])
+    assert "--gap" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("options", [{"q": 0.0}, {"r": 1e-9}, {"q": 1e6}, {"r": 1e9}, {"seed": 99999999999}])
+def test_extreme_but_valid_options_never_crash_a_simulation(options):
+    for sid, sim in sims.SIMS.items():                       # -W error: no numpy warning either
+        res = sim(sims.Options(**options))
+        assert res.summary and res.table, (sid, options)
+
+
+def test_option_error_is_what_the_simulations_raise():
+    assert issubclass(sims.OptionError, ValueError)
+    with pytest.raises(sims.OptionError, match="195:230"):
+        sims.SIMS["14-nis"](sims.Options(gap=(195, 230)))
+    with pytest.raises(sims.OptionError, match="60"):
+        sims.SIMS["13-q-r-tradeoff"](sims.Options(gap=(50, 70)))
+
+
+# --- what a learner sees after a run -----------------------------------------------------
+
+def test_run_ends_with_the_essay_section_and_the_next_simulation(progress, tmp_path, capsys):
+    out = run(capsys, "run", "03-1d-loop", "--out", str(tmp_path))
+    tail = out.splitlines()[-3:]
+    assert tail == ["In the essay: 3. The one-dimensional loop",
+                    f"  {ESSAY}#3-the-one-dimensional-loop",
+                    "Next: 01-fusion (fuse two measurements)"]
+    out = run(capsys, "run", "14-nis", "--out", str(tmp_path))
+    assert f"  {ESSAY}#14-is-the-filter-honest-the-nis-test" in out
+    assert out.splitlines()[-1] == "Next: 01-fusion (fuse two measurements)"
+
+
+def test_run_next_is_the_same_as_where_and_the_last_run_says_lesson_one_is_done(progress, tmp_path, capsys):
+    ids = list(sims.SIMS)
+    for i, sid in enumerate(ids):
+        out = run(capsys, "run", sid, "--out", str(tmp_path))
+        if i < len(ids) - 1:
+            assert out.splitlines()[-1] == f"Next: {ids[i + 1]} ({registry.entry(ids[i + 1]).title[0]})"
+    assert out.splitlines()[-1] == "Lesson 1 is done. Lesson 2 (EKF) is being written."
+    assert "Next:" not in out
+
+
+def test_turkish_run_points_to_the_turkish_essay_and_says_sirada(progress, tmp_path, capsys):
+    out = run(capsys, "run", "03-1d-loop", "--lang", "tr", "--out", str(tmp_path))
+    assert out.splitlines()[-3:] == ["Yazıda: bölüm 3", f"  {ESSAY}-tr",
+                                     "Sırada: 01-fusion (iki ölçümü birleştir)"]
+    assert "Next" not in out and "In the essay" not in out
 
 
 # --- Turkish -----------------------------------------------------------------------------
@@ -158,7 +262,7 @@ def test_turkish_list_where_and_run(progress, tmp_path, capsys):
     assert re.search(r"^\s+std_filter\s+0,\d+$", out, re.M)               # decimal comma, as on the figures
     assert re.search(r"^\s+theory_derivative\s+4,243$", out, re.M)
     where = run(capsys, "where", "--lang", "tr")
-    assert where.startswith("Ders 1 ·") and "Sıradaki: 01-fusion (iki ölçümü birleştir)" in where and "Next" not in where
+    assert where.startswith("Ders 1 ·") and "Sırada: 01-fusion (iki ölçümü birleştir)" in where and "Next" not in where
     assert (tmp_path / "05-derivative-vs-filter.png").exists()
 
 
@@ -205,6 +309,15 @@ def test_readme_table_links_every_id_to_its_essay_section():
     for needle in ("git clone https://github.com/mftnakrsu/fusion-by-hand", "uv sync", "uv run fbh list",
                    "uv run fbh run 03-1d-loop", "MIT"):
         assert needle in readme
+
+
+def test_readme_commands_are_all_written_with_uv_run_and_the_progress_file_is_documented():
+    readme = (ROOT / "README.md").read_text()
+    assert not re.search(r"^fbh ", readme, re.M)                               # a learner cannot type a bare `fbh`
+    for cmd in ("list", "where", "run", "export"):
+        assert f"uv run fbh {cmd}" in readme
+    assert ".fbh-progress.json" in readme and "FBH_PROGRESS" in readme and "current directory" in readme
+    assert "none" not in readme.split("Options of")[1].split("\n\n")[0]       # `--gap none` is gone
 
 
 def test_lesson_readme_has_a_paragraph_and_a_command_per_id():

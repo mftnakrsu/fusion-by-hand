@@ -1,10 +1,15 @@
 import json
+import re
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from fbh import export, scenarios, sims
 from fbh.cli import main
+
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(scope="module")
@@ -124,3 +129,62 @@ def test_cli_export_command(tmp_path, capsys):
     assert (tmp_path / "new" / "dir" / "tracking.json").exists()
     printed = capsys.readouterr().out
     assert "kf-cases.json" in printed and "tracking.json" in printed
+
+
+# --- the README's "Export format" is enough to write a port -------------------------------
+
+def readme_section(title):
+    text = (ROOT / "README.md").read_text()
+    return re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.M | re.S).group(1)
+
+
+def port_from_the_readme(t, q, r, gap):
+    """The filter exactly as README "Export format" words it, in plain Python (what the browser will do)."""
+    sd = r ** 0.5
+    x, P = list(t["x0"]), [list(row) for row in t["P0"]]                  # the frame-0 prior
+    out = {"x": [], "P": [], "K": []}
+    for k in range(1, t["n"] + 1):
+        x = [x[0] + x[1], x[1]]                                           # predict, in frame 1 too: x- = F x
+        (a, b), (c, d) = P                                                # P- = F P F^T + Q, F = [[1,1],[0,1]]
+        P = [[a + c + b + d + q / 3, b + d + q / 2], [c + d + q / 2, d + q]]
+        K = None
+        if gap is None or not gap[0] <= k <= gap[1]:                      # gap frames: predict only
+            z = t["p"][k - 1] + sd * t["noise"][k - 1]                    # z = p + sqrt(r) noise, frames 1-based
+            y, S = z - x[0], P[0][0] + r                                  # H = [1, 0], R = r
+            K = [P[0][0] / S, P[1][0] / S]                                # K = P- H^T / S
+            x = [x[0] + K[0] * y, x[1] + K[1] * y]
+            P = [[(1 - K[0]) * P[0][0], (1 - K[0]) * P[0][1]],            # P = (I - K H) P-, not Joseph, not symmetrised
+                 [P[1][0] - K[1] * P[0][0], P[1][1] - K[1] * P[0][1]]]
+        out["x"].append(x), out["P"].append([list(row) for row in P]), out["K"].append(K)
+    return out
+
+
+def test_a_port_written_only_from_the_readme_reproduces_every_case_to_1e_9(out):
+    t = load(out, "tracking.json")
+    for c in load(out, "kf-cases.json")["cases"]:
+        mine = port_from_the_readme(t, c["q"], c["r"], t["gap"] if c["gap"] else None)
+        np.testing.assert_allclose(mine["x"], c["x"], rtol=1e-9, atol=1e-12)
+        np.testing.assert_allclose(mine["P"], c["P"], rtol=1e-9, atol=1e-12)
+        assert [k is None for k in mine["K"]] == [k is None for k in c["K"]]
+        np.testing.assert_allclose([k for k in mine["K"] if k], [k for k in c["K"] if k], rtol=1e-9, atol=1e-12)
+
+
+def test_readme_export_section_describes_every_file_and_key_and_the_semantics(out):
+    section = readme_section("Export format")
+    for name in ("tracking.json", "kf-cases.json", "derivative.json", "covariance.json", "nis.json"):
+        assert f"`{name}`" in section, name
+        top = load(out, name)
+        for key in top:
+            assert f"`{key}`" in section, (name, key)
+    for key in ("x", "P", "K", "q", "r", "gap"):                                   # inside a kf-cases case
+        assert f"`{key}`" in section
+    for phrase in ("unit normal", "sqrt(r)", "1-based", "inclusive", "predict", "frame 1", "x0", "P0", "after the update",
+                   "[[1, 1], [0, 1]]", "[1, 0]", "[[1/3, 1/2], [1/2, 1]]", "(I - K H) P", "Joseph", "symmetric", "1e-9",
+                   "null"):
+        assert phrase in section, phrase
+
+
+def test_module_docstring_states_the_same_semantics():
+    doc = export.__doc__
+    for phrase in ("unit normal", "1-based", "inclusive", "frame 1", "x0", "P0", "after the update", "Joseph", "1e-9", "null"):
+        assert phrase in doc, phrase

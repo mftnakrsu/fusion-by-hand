@@ -33,6 +33,18 @@ class Result:
     plot: Callable[..., Path]               # plot(out_dir, lang=None) -> <out_dir>/<id>.png
 
 
+class OptionError(ValueError):
+    """An option the simulation cannot honour (a gap that does not fit, ...); the CLI shows it as a usage error."""
+
+
+def _check_gap(gap, n: int) -> None:
+    a, b = gap
+    if not 1 <= a <= b <= n:
+        raise OptionError(f"the gap {a}:{b} does not fit in the {n} frames of this run (frames 1 to {n})")
+    if a == 1 and b == n:
+        raise OptionError(f"the gap {a}:{b} leaves no measurement at all")
+
+
 def _pick(value, default):
     return default if value is None else value
 
@@ -71,6 +83,8 @@ def run_cv(scn: dict, q: float, r: float, r_true: float | None = None) -> dict:
     x = np.array(scn["x0"], dtype=float).reshape(2, 1)
     P = np.array(scn["P0"], dtype=float)
     gap = scn["gap"]
+    if gap is not None:
+        _check_gap(gap, len(scn["p"]))
     out = {key: [] for key in ("xm", "Pm", "x", "P", "y", "S", "K", "nis", "z")}
     for k, (p, e) in enumerate(zip(scn["p"], scn["noise"]), start=1):
         x, P = predict(x, P, F, Q)
@@ -217,6 +231,13 @@ def nis(seed: int = 1, n: int = 400, q: float = 0.01, r: float = 4.0, r_sensor: 
             "q_small": run_cv(jump, q, r)}
     keep = [k for k, v in enumerate(runs["honest"]["nis"]) if v is not None]
     frames = np.array([k + 1 for k in keep])
+    near = (frames >= maneuver) & (frames < maneuver + window)
+    label = "the gap" if gap is None else f"the gap {gap[0]}:{gap[1]}"
+    if len(keep) < window:
+        raise OptionError(f"{label} leaves only {len(keep)} measured frames, the {window}-frame average needs {window}")
+    if not near.any():
+        raise OptionError(f"{label} hides the whole maneuver window (frames {maneuver} to {maneuver + window - 1}), "
+                          "so there is nothing to show there; leave some of those frames")
     out = {"k": frames.tolist(), "bound": CHI2_95_1DOF, "n": len(keep), "q": q, "r": r, "r_sensor": r_sensor,
            "maneuver": maneuver, "dv": dv, "window": [maneuver, maneuver + window - 1]}
     for name, run in runs.items():
@@ -224,7 +245,6 @@ def nis(seed: int = 1, n: int = 400, q: float = 0.01, r: float = 4.0, r_sensor: 
         out[name] = values
         out[f"{name}_mean"] = float(values.mean())
         out[f"{name}_above"] = float(np.mean(values > CHI2_95_1DOF))
-    near = (frames >= maneuver) & (frames < maneuver + window)
     out["q_small_inside_mean"] = float(out["q_small"][near].mean())
     out["q_small_outside_mean"] = float(out["q_small"][~near].mean())
     return out
