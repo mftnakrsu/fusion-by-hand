@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 from .i18n import t
@@ -15,6 +16,7 @@ from .i18n import t
 PAPER, INK, TERRACOTTA, BLUE = "#fbfaf7", "#2b2d33", "#c0612b", "#3d6fb0"
 MUTED, GRID = "#8a8d96", "#e8e5de"
 BLUE_LIGHT = "#8fb0d8"
+GREEN = "#3f8a72"
 SIZE_PX, DPI = (1600, 900), 100
 
 RC = {
@@ -132,21 +134,23 @@ def one_d_loop(fig, d, lang):
 
 def derivative_vs_filter(fig, d, lang):
     ax = fig.add_subplot()
-    _style(ax, lang, int_x=True)
-    k = d["k"]
-    sigma = "σ"
+    _style(ax, lang)
+    k, sig = d["k"], d["std_position"]
     ax.axhline(d["truth_v"], color=INK, ls="--", lw=1.8, label=t("truth", lang))
-    ax.plot(k, d["derivative"], color=BLUE, lw=1.8, marker="o", ms=6,
-            label=f"{t('deriv_difference', lang)} ({sigma} = {num(d['std_derivative'], lang, 1)})")
+    for sign in (1, -1):                                                 # the level of the position noise itself
+        ax.axhline(sign * sig, color=MUTED, ls=":", lw=2.2,
+                   label=f"±{t('deriv_position_noise', lang)} (σ = {num(sig, lang, 1)})" if sign == 1 else None)
+    ax.plot(k, d["derivative"], color=BLUE, lw=1.2, marker="o", ms=3.5,
+            label=f"{t('deriv_difference', lang)} (σ = {num(d['std_derivative'], lang, 1)})")
     ax.plot(k, d["filter"], color=TERRACOTTA, lw=3.4,
-            label=f"{t('filter', lang)} ({sigma} = {num(d['std_filter'], lang, 1)})")
+            label=f"{t('filter', lang)} (σ = {num(d['std_filter'], lang, 1)})")
     lim = 1.15 * float(np.max(np.abs(d["derivative"])))
     ax.set_ylim(-lim, lim)
-    ax.set_xlim(k[0] - 0.5, k[-1] + 0.5)
+    ax.set_xlim(k[0] - 1, k[-1] + 1)
     ax.set_xlabel(t("frame", lang))
     ax.set_ylabel(t("deriv_ylabel", lang))
     ax.set_title(t("deriv_title", lang))
-    _legend(ax, "upper right")
+    _legend(ax, "upper right", ncols=2, columnspacing=1.6)
 
 
 # --- 08-covariance ----------------------------------------------------------------------
@@ -236,23 +240,38 @@ def _rolling(values, window):
 
 
 def nis(fig, d, lang):
-    ax = fig.add_subplot()
-    _style(ax, lang, int_x=True)
+    axes = fig.subplots(3, 1, sharex=True, sharey=True)
     k, window = np.array(d["k"]), 20
-    for key, color, name in (("overconfident", TERRACOTTA, t("nis_over", lang)), ("honest", BLUE, t("nis_honest", lang))):
-        ax.plot(k, d[key], ls="none", marker="o", ms=4.5, color=color, alpha=0.22, mew=0)
-        ax.plot(k[window - 1:], _rolling(d[key], window), color=color, lw=3.2,
-                label=f"{name}: {t('mean', lang)} {num(d[key + '_mean'], lang, 1)}")
-    ax.axhline(1, color=INK, ls="--", lw=1.8, label=t("nis_expected", lang))
-    ax.axhline(d["bound"], color=MUTED, ls=":", lw=2, label=f"{t('nis_bound', lang)}: {num(d['bound'], lang, 2)}")
-    ax.axvline(d["maneuver"], color=MUTED, lw=1.2, ls=":")
-    ax.text(d["maneuver"] + 3, 15.2, t("maneuver", lang), color=MUTED, fontsize=15)
-    ax.set_ylim(0, 16)
-    ax.set_xlim(k[0], k[-1])
-    ax.set_xlabel(t("frame", lang))
-    ax.set_ylabel(f"{t('nis_ylabel', lang)} ({t('nis_window', lang)})")
-    ax.set_title(t("nis_title", lang))
-    _legend(ax, "upper right")
+    mean = t("mean", lang)
+    m = lambda key: num(d[key], lang, 1)
+    panels = (
+        ("honest", BLUE, f"{t('nis_honest', lang)}: {mean} {m('honest_mean')}"),
+        ("overconfident", TERRACOTTA, f"{t('nis_over', lang)}: {mean} {m('overconfident_mean')}"
+         f"  ({t('nis_over_detail', lang).format(r=num(d['r'], lang), r_sensor=num(d['r_sensor'], lang))})"),
+        ("q_small", GREEN, f"{t('nis_qsmall', lang)}: " + t("nis_inside", lang).format(
+            inside=m("q_small_inside_mean"), outside=m("q_small_outside_mean"))),
+    )
+    for ax, (key, color, title) in zip(axes, panels):
+        _style(ax, lang, int_x=True)
+        ax.plot(k, d[key], ls="none", marker="o", ms=4.5, color=color, alpha=0.25, mew=0)
+        ax.plot(k[window - 1:], _rolling(d[key], window), color=color, lw=3.2)
+        ax.axhline(1, color=INK, ls="--", lw=1.6)
+        ax.axhline(d["bound"], color=MUTED, ls=":", lw=2)
+        ax.set_ylim(0, 16)
+        ax.set_yticks([0, 5, 10, 15])
+        ax.set_xlim(k[0], k[-1])
+        ax.set_title(title, fontsize=17, pad=8)
+    lo, hi = d["window"]
+    axes[2].axvspan(lo, hi, color=GREEN, alpha=0.14, lw=0)
+    axes[2].text(hi + 4, 13.2, t("maneuver", lang), color=MUTED, fontsize=15)
+    axes[2].set_xlabel(t("frame", lang))
+    axes[1].set_ylabel(t("nis_ylabel", lang))
+    handles = [Line2D([], [], ls="none", marker="o", ms=5, color=MUTED, alpha=0.5, label=t("nis_single", lang)),
+               Line2D([], [], color=MUTED, lw=3.2, label=t("nis_window", lang)),
+               Line2D([], [], color=INK, ls="--", lw=1.6, label=t("nis_expected", lang)),
+               Line2D([], [], color=MUTED, ls=":", lw=2, label=f"{t('nis_bound', lang)}: {num(d['bound'], lang, 2)}")]
+    axes[0].legend(handles=handles, loc="upper right", ncols=2, fontsize=14, columnspacing=1.4)
+    fig.suptitle(t("nis_title", lang), x=0.06, ha="left", fontsize=21, fontweight="bold")
 
 
 PLOTS = {

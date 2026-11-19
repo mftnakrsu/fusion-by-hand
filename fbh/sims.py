@@ -117,12 +117,16 @@ def one_d_loop(x: float = 200.0, P: float = 4.0, u: float = 10.0, Q: float = 5.0
     return {"rows": rows, "u": u, "Q": Q, "R": R}
 
 
-def derivative_vs_filter(seed: int = 0, n: int = 40, r: float = 9.0, q: float = 0.01) -> dict:
-    """Section 5: a target that does not move at all, seen through a box that jitters by sqrt(r) px.
+def derivative_vs_filter(seed: int = 0, n: int = 200, r: float = 9.0, q: float = 0.01) -> dict:
+    """Section 5: a target that does not move at all, seen through a box that jitters by sigma = sqrt(r) px.
 
     Velocity from the difference of two measurements against the filter's velocity, frames 2..n.
+    The difference of two independent errors has std sqrt(2) * sigma / dt (`theory_derivative`);
+    `std_position` is the measured scatter of the position itself, which the difference exceeds.
+    n is large enough (200) that the measured stds sit close to these values for any seed.
     """
-    z = 250.0 + np.sqrt(r) * np.random.default_rng(seed).standard_normal(n)
+    sigma = float(np.sqrt(r))
+    z = 250.0 + sigma * np.random.default_rng(seed).standard_normal(n)
     F, H, Q, R = cv_model(1.0, q, r)
     x, P = np.array([[z[0]], [0.0]]), np.diag([r, r])        # start from the first box, velocity unknown
     filt = []
@@ -133,12 +137,13 @@ def derivative_vs_filter(seed: int = 0, n: int = 40, r: float = 9.0, q: float = 
         filt.append(float(x[1, 0]))
     deriv = np.diff(z)
     return {"k": list(range(2, n + 1)), "z": z[1:], "derivative": deriv, "filter": np.array(filt),
+            "sigma": sigma, "std_position": float(np.std(z - 250.0)), "theory_derivative": float(np.sqrt(2) * sigma),
             "std_derivative": float(np.std(deriv)), "std_filter": float(np.std(filt)),
             "truth_v": 0.0, "r": r, "q": q}
 
 
 def covariance_cloud(n: int = 20000, seed: int = 0, P=P_EXAMPLE, dt: float = 1.0) -> dict:
-    """Section 9: errors drawn from N(0, P), pushed through F. The cloud's covariance is F P Fᵀ."""
+    """Sections 8 and 9: errors drawn from N(0, P) (the P of section 8), pushed through F; the cloud's covariance is F P Fᵀ (section 9)."""
     P = np.array(P, dtype=float)
     F = cv_model(dt, 0.0, 1.0)[0]
     e = np.random.default_rng(seed).standard_normal((n, 2)) @ np.linalg.cholesky(P).T
@@ -173,35 +178,56 @@ def maneuver_response(seed: int = 7, q_small: float = 0.01, q_big: float = 1.0, 
                       gap=None, band: float = 1.0) -> dict:
     """Section 13: the same camera on a target that speeds up from 10 to 14 px/frame, for a calm and an agile filter.
 
-    `settle` counts the frames from the maneuver until the velocity estimate is within `band` of
-    the new speed (None if it never gets there); `calm_std` is the estimate's scatter over frames
-    10..maneuver-1, while the target flies straight.
+    `settle` counts the frames from the maneuver until the velocity estimate is within `band` of the
+    new speed and stays there to the end of the run (None if it is still outside in the last frame).
+    `reach` is the first frame it touches the band, however briefly. `calm_std` is the estimate's
+    scatter over frames 10..maneuver-1, while the target flies straight.
     """
     scn = scenarios.tracking(seed=seed, gap=gap)
-    m = scn["maneuver"]
-    out = {"scn": scn, "r": r, "band": band, "new_v": scn["v"][-1]}
+    m, new_v = scn["maneuver"], scn["v"][-1]
+    out = {"scn": scn, "r": r, "band": band, "new_v": new_v}
     for name, q in (("small", q_small), ("big", q_big)):
         run = run_cv(scn, q, r)
         v = [x[1] for x in run["x"]]
-        settle = next((k - m for k in range(m, len(v) + 1) if abs(v[k - 1] - out["new_v"]) <= band), None)
-        out[name] = {"q": q, "v": v, "settle": settle, "calm_std": float(np.std(v[9:m - 1])),
+        inside = [abs(vk - new_v) <= band for vk in v]
+        reach = next((k - m for k in range(m, len(v) + 1) if inside[k - 1]), None)
+        settle = None
+        for k in range(len(v), m - 1, -1):                    # walk back from the end while it stays inside
+            if not inside[k - 1]:
+                break
+            settle = k - m
+        out[name] = {"q": q, "v": v, "reach": reach, "settle": settle, "calm_std": float(np.std(v[9:m - 1])),
                      "sigma_v": [float(np.sqrt(P[1][1])) for P in run["P"]]}
     return out
 
 
-def nis(seed: int = 1, n: int = 400, q: float = 0.01, r: float = 4.0, r_overconfident: float = 20.0,
-        gap=None) -> dict:
-    """Section 14: one filter told the truth (R = r) and one that believes R = r while the sensor really has r_overconfident."""
-    scn = scenarios.tracking(seed=seed, n=n, gap=gap)
-    honest = run_cv(scn, q, r)
-    over = run_cv(scn, q, r, r_true=r_overconfident)
-    keep = [k for k, v in enumerate(honest["nis"]) if v is not None]
-    h, o = np.array([honest["nis"][k] for k in keep]), np.array([over["nis"][k] for k in keep])
-    return {"k": [k + 1 for k in keep], "honest": h, "overconfident": o,
-            "honest_mean": float(h.mean()), "overconfident_mean": float(o.mean()),
-            "bound": CHI2_95_1DOF,
-            "honest_above": float(np.mean(h > CHI2_95_1DOF)), "overconfident_above": float(np.mean(o > CHI2_95_1DOF)),
-            "n": len(keep), "q": q, "r": r, "r_overconfident": r_overconfident, "maneuver": scn["maneuver"]}
+def nis(seed: int = 1, n: int = 400, q: float = 0.01, r: float = 4.0, r_sensor: float = 20.0,
+        maneuver: int | None = None, dv: float = 4.0, window: int = 20, gap=None) -> dict:
+    """Section 14, three runs of the same filter (q, R = r) on targets that obey its own model.
+
+    honest:         the sensor really has R = r, so NIS has mean 1 (chi-square, one degree of freedom).
+    overconfident:  same target, but the sensor really has R = r_sensor: the filter claims more than it knows.
+    q_small:        the sensor is right, but the target jumps by dv px/frame at frame `maneuver` (default n/2),
+                    which q cannot explain: NIS spikes for about `window` frames after the jump, nowhere else.
+    """
+    maneuver = n // 2 if maneuver is None else maneuver
+    calm = scenarios.model_truth(seed=seed, n=n, q=q, gap=gap)
+    jump = scenarios.model_truth(seed=seed, n=n, q=q, maneuver=maneuver, dv=dv, gap=gap)
+    runs = {"honest": run_cv(calm, q, r), "overconfident": run_cv(calm, q, r, r_true=r_sensor),
+            "q_small": run_cv(jump, q, r)}
+    keep = [k for k, v in enumerate(runs["honest"]["nis"]) if v is not None]
+    frames = np.array([k + 1 for k in keep])
+    out = {"k": frames.tolist(), "bound": CHI2_95_1DOF, "n": len(keep), "q": q, "r": r, "r_sensor": r_sensor,
+           "maneuver": maneuver, "dv": dv, "window": [maneuver, maneuver + window - 1]}
+    for name, run in runs.items():
+        values = np.array([run["nis"][k] for k in keep])
+        out[name] = values
+        out[f"{name}_mean"] = float(values.mean())
+        out[f"{name}_above"] = float(np.mean(values > CHI2_95_1DOF))
+    near = (frames >= maneuver) & (frames < maneuver + window)
+    out["q_small_inside_mean"] = float(out["q_small"][near].mean())
+    out["q_small_outside_mean"] = float(out["q_small"][~near].mean())
+    return out
 
 
 # --- ids -> Result ----------------------------------------------------------------------
@@ -227,7 +253,8 @@ def _sim_derivative(o: Options) -> Result:
     d = derivative_vs_filter(seed=_pick(o.seed, 0), r=_pick(o.r, 9.0), q=_pick(o.q, 0.01))
     table = [{"k": k, "z": z, "derivative": dv, "filter": fv}
              for k, z, dv, fv in zip(d["k"], d["z"], d["derivative"], d["filter"])]
-    summary = {"std_derivative": d["std_derivative"], "std_filter": d["std_filter"],
+    summary = {"sigma": d["sigma"], "std_position": d["std_position"], "theory_derivative": d["theory_derivative"],
+               "std_derivative": d["std_derivative"], "std_filter": d["std_filter"],
                "ratio": d["std_derivative"] / d["std_filter"]}
     return _result("05-derivative-vs-filter", d, table, summary, o)
 
@@ -259,17 +286,20 @@ def _sim_tradeoff(o: Options) -> Result:
              for ra, rb in zip(a["rows"], b["rows"])]
     summary = {"q_small": 0.01, "q_big": q_big, "std_v_10_30_small": a["std_v_10_30"], "std_v_10_30_big": b["std_v_10_30"],
                "K_v_30_small": a["rows"][-1]["K_v"], "K_v_30_big": b["rows"][-1]["K_v"],
-               "maneuver_r": man["r"], "settle_small": man["small"]["settle"], "settle_big": man["big"]["settle"],
+               "maneuver_r": man["r"], "reach_small": man["small"]["reach"], "reach_big": man["big"]["reach"],
+               "settle_small": man["small"]["settle"], "settle_big": man["big"]["settle"],
                "calm_std_small": man["small"]["calm_std"], "calm_std_big": man["big"]["calm_std"]}
     return _result("13-q-r-tradeoff", data, table, summary, o)
 
 
 def _sim_nis(o: Options) -> Result:
     r = _pick(o.r, 4.0)
-    d = nis(seed=_pick(o.seed, 1), q=_pick(o.q, 0.01), r=r, r_overconfident=5 * r, gap=o.gap)
-    table = [{"k": k, "nis_honest": a, "nis_overconfident": b} for k, a, b in zip(d["k"], d["honest"], d["overconfident"])]
-    summary = {key: d[key] for key in ("n", "honest_mean", "overconfident_mean", "bound", "honest_above", "overconfident_above")}
-    return _result("14-nis", d, table, summary, o)
+    d = nis(seed=_pick(o.seed, 1), q=_pick(o.q, 0.01), r=r, r_sensor=5 * r, gap=o.gap)
+    table = [{"k": k, "nis_honest": a, "nis_overconfident": b, "nis_q_small": c}
+             for k, a, b, c in zip(d["k"], d["honest"], d["overconfident"], d["q_small"])]
+    keys = ("n", "r", "r_sensor", "maneuver", "bound", "honest_mean", "overconfident_mean", "q_small_mean",
+            "q_small_inside_mean", "q_small_outside_mean", "honest_above", "overconfident_above", "q_small_above")
+    return _result("14-nis", d, table, {key: d[key] for key in keys}, o)
 
 
 SIMS: dict[str, Callable[[Options], Result]] = {

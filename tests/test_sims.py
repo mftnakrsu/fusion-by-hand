@@ -95,12 +95,59 @@ def test_run_cv_without_gap_has_every_measurement():
 
 def test_nis_summary_and_gap_handling():
     r = sims.nis(seed=1)
-    assert len(r["honest"]) == len(r["overconfident"]) == 400
-    assert r["bound"] == pytest.approx(3.84)
+    assert len(r["honest"]) == len(r["overconfident"]) == len(r["q_small"]) == 400
+    assert r["bound"] == pytest.approx(3.84) and r["maneuver"] == 200
     assert r["overconfident_mean"] > 3 * r["honest_mean"]
     # with a gap, the missing frames are simply not counted
     res = sims.SIMS["14-nis"](sims.Options(gap=(20, 27)))
     assert res.summary["n"] == 392
+
+
+def test_model_truth_follows_the_filters_own_model():
+    scn = scenarios.model_truth(seed=3, n=20000, q=0.01)
+    assert set(scn) == set(scenarios.tracking()) | {"q"} and scn["maneuver"] is None and scn["gap"] is None
+    v = np.array(scn["v"])
+    assert np.std(np.diff(v)) == pytest.approx(np.sqrt(0.01), rel=0.03)         # Var(w_v) = q dt
+    p = np.array(scn["p"])
+    assert np.std(p[1:] - p[:-1] - v[:-1]) == pytest.approx(np.sqrt(0.01 / 3), rel=0.03)   # Var(w_p) = q dt^3/3
+    assert json.loads(json.dumps(scn)) == scn
+
+
+def test_model_truth_maneuver_is_a_pure_velocity_step_on_the_same_draws():
+    calm, jump = scenarios.model_truth(seed=5, n=100), scenarios.model_truth(seed=5, n=100, maneuver=60, dv=4.0)
+    assert calm["noise"] == jump["noise"]
+    dv = np.array(jump["v"]) - np.array(calm["v"])
+    np.testing.assert_allclose(dv[:59], 0), np.testing.assert_allclose(dv[59:], 4.0)
+    dp = np.array(jump["p"]) - np.array(calm["p"])
+    np.testing.assert_allclose(dp[60:], 4.0 * np.arange(1, 41))                 # F carries the new speed from frame 61 on
+
+
+SEEDS = range(20)
+
+
+def test_nis_honest_filter_is_honest_for_every_seed():
+    means = [sims.nis(seed=s)["honest_mean"] for s in SEEDS]
+    # the mean of 400 chi-square(1) draws has sd sqrt(2/400) = 0.07, so 0.85..1.15 is a 2 sigma band: all of these seeds sit in it
+    assert all(0.85 < m < 1.15 for m in means), means
+    assert 0.97 < np.mean(means) < 1.03                                          # pooled over 8000 frames: sd 0.016
+
+
+def test_nis_overconfident_filter_is_flagged_for_every_seed():
+    means = [sims.nis(seed=s)["overconfident_mean"] for s in SEEDS]
+    assert all(m > 3 for m in means), means
+
+
+def test_nis_q_too_small_spikes_only_around_the_maneuver():
+    for s in SEEDS:
+        r = sims.nis(seed=s)
+        assert r["q_small_inside_mean"] > 3 and r["q_small_inside_mean"] > 3 * r["q_small_outside_mean"], s
+        assert 0.7 < r["q_small_outside_mean"] < 1.3, s                          # away from the manoeuvre it is honest
+        assert 0.85 < r["honest_mean"] < 1.15                                    # and the manoeuvre-free truth never spikes
+    lo, hi = r["window"]
+    k, calm, jump = np.array(r["k"]), np.array(r["honest"]), np.array(r["q_small"])
+    before = k < r["maneuver"]
+    np.testing.assert_allclose(calm[before], jump[before])                       # identical until the step
+    assert lo == r["maneuver"] and hi == r["maneuver"] + 19
 
 
 def test_options_default_to_none_and_overrides_are_used():
@@ -147,3 +194,31 @@ def test_turkish_numbers_use_decimal_commas():
     fmt = plot.tick_formatter("tr")
     assert fmt(0.5, 0) == "0,5" and fmt(250.0, 0) == "250" and fmt(-2.0, 0) == "−2"
     assert plot.tick_formatter("en")(0.5, 0) == "0.5"
+
+
+def test_derivative_std_matches_sqrt2_sigma_and_beats_the_position_noise():
+    for seed in SEEDS:
+        r = sims.derivative_vs_filter(seed=seed)
+        assert r["sigma"] == 3.0 and r["theory_derivative"] == pytest.approx(np.sqrt(2) * 3.0)
+        assert abs(r["std_derivative"] / r["theory_derivative"] - 1) < 0.15, seed
+        assert r["std_derivative"] > r["std_position"], seed
+        assert r["std_derivative"] > 10 * r["std_filter"], seed
+    res = sims.SIMS["05-derivative-vs-filter"](sims.Options())
+    assert {"std_position", "theory_derivative", "std_derivative", "std_filter"} <= set(res.summary)
+    assert len(res.table) == 199
+
+
+def test_maneuver_settle_means_it_stays_inside_the_band():
+    for seed in (7, 0, 2):
+        for r in (1.0, 4.0):
+            m = sims.maneuver_response(seed=seed, r=r)
+            k0, new_v = m["scn"]["maneuver"], m["new_v"]
+            for name in ("small", "big"):
+                v, settle = np.array(m[name]["v"]), m[name]["settle"]
+                inside = np.abs(v - new_v) <= m["band"]
+                if settle is None:
+                    assert not inside[-1]
+                else:
+                    assert inside[k0 - 1 + settle:].all()                        # in the band from that frame on...
+                    assert settle == 0 or not inside[k0 - 2 + settle]            # ...and not already one frame earlier
+                assert m[name]["reach"] <= (settle if settle is not None else 10**6)

@@ -31,6 +31,7 @@ _TEXT = {
     "deriv_title": ("A target that does not move", "Hiç hareket etmeyen hedef"),
     "deriv_difference": ("difference of two boxes", "iki kutunun farkı"),
     "deriv_ylabel": ("velocity estimate (px/frame)", "hız tahmini (px/kare)"),
+    "deriv_position_noise": ("position noise", "konum gürültüsü"),
     # 08-covariance
     "cov_before": ("before the prediction: P", "tahminden önce: P"),
     "cov_after": ("after the prediction: F P Fᵀ", "tahminden sonra: F P Fᵀ"),
@@ -53,9 +54,13 @@ _TEXT = {
     "nis_ylabel": ("NIS", "NIS"),
     "nis_honest": ("honest filter", "dürüst filtre"),
     "nis_over": ("overconfident filter", "fazla emin filtre"),
+    "nis_over_detail": ("filter R = {r}, sensor R = {r_sensor}", "filtre R = {r}, sensör R = {r_sensor}"),
+    "nis_qsmall": ("Q too small", "Q çok küçük"),
+    "nis_inside": ("around the maneuver {inside}, elsewhere {outside}", "manevra çevresinde {inside}, başka yerde {outside}"),
     "nis_expected": ("expected mean: 1", "beklenen ortalama: 1"),
     "nis_bound": ("χ² 95 % bound", "χ² %95 sınırı"),
     "nis_window": ("average over 20 frames", "20 karelik ortalama"),
+    "nis_single": ("single frame", "tek kare"),
 }
 
 LANGS = ("en", "tr")
