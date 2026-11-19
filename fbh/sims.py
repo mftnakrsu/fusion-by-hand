@@ -125,8 +125,8 @@ def derivative_vs_filter(seed: int = 0, n: int = 200, r: float = 9.0, q: float =
     `std_position` is the measured scatter of the position itself, which the difference exceeds.
     n is large enough (200) that the measured stds sit close to these values for any seed.
     """
-    sigma = float(np.sqrt(r))
-    z = 250.0 + sigma * np.random.default_rng(seed).standard_normal(n)
+    sigma, truth_p = float(np.sqrt(r)), 250.0
+    z = truth_p + sigma * np.random.default_rng(seed).standard_normal(n)
     F, H, Q, R = cv_model(1.0, q, r)
     x, P = np.array([[z[0]], [0.0]]), np.diag([r, r])        # start from the first box, velocity unknown
     filt = []
@@ -137,9 +137,9 @@ def derivative_vs_filter(seed: int = 0, n: int = 200, r: float = 9.0, q: float =
         filt.append(float(x[1, 0]))
     deriv = np.diff(z)
     return {"k": list(range(2, n + 1)), "z": z[1:], "derivative": deriv, "filter": np.array(filt),
-            "sigma": sigma, "std_position": float(np.std(z - 250.0)), "theory_derivative": float(np.sqrt(2) * sigma),
+            "sigma": sigma, "std_position": float(np.std(z - truth_p)), "theory_derivative": float(np.sqrt(2) * sigma),
             "std_derivative": float(np.std(deriv)), "std_filter": float(np.std(filt)),
-            "truth_v": 0.0, "r": r, "q": q}
+            "truth_p": truth_p, "truth_v": 0.0, "r": r, "q": q}
 
 
 def covariance_cloud(n: int = 20000, seed: int = 0, P=P_EXAMPLE, dt: float = 1.0) -> dict:
