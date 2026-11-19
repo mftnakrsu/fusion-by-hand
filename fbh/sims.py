@@ -3,38 +3,18 @@
 Every id in SIMS maps an Options to a Result (table, summary, plot). A simulation reads only the
 options it has a use for and ignores the others; None always means "the simulation's own default".
 The functions below it (velocity_learning, nis, ...) are the same runs with their raw numbers.
+SIMS holds the ids of both lessons, lesson 1's first; lesson 2's simulations live in sims2.py.
 """
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
 import numpy as np
 
-from . import plot, scenarios
+from . import scenarios, sims2
+from .base import Options, OptionError, Result, _pick, _plain, _result
 from .kf import cv_model, fuse, predict, update
 
 P_EXAMPLE = [[2.5, 1.0], [1.0, 0.5]]        # the covariance worked out by hand in section 8
 CHI2_95_1DOF = 3.84                         # 95 % bound of a chi-square with one degree of freedom
-
-
-@dataclass
-class Options:
-    q: float | None = None
-    r: float | None = None
-    gap: tuple[int, int] | None = None
-    seed: int | None = None
-    lang: str | None = None                 # None is "en"
-
-
-@dataclass
-class Result:
-    table: list[dict]
-    summary: dict
-    plot: Callable[..., Path]               # plot(out_dir, lang=None) -> <out_dir>/<id>.png
-
-
-class OptionError(ValueError):
-    """An option the simulation cannot honour (a gap that does not fit, ...); the CLI shows it as a usage error."""
 
 
 def _check_gap(gap, n: int) -> None:
@@ -43,29 +23,6 @@ def _check_gap(gap, n: int) -> None:
         raise OptionError(f"the gap {a}:{b} does not fit in the {n} frames of this run (frames 1 to {n})")
     if a == 1 and b == n:
         raise OptionError(f"the gap {a}:{b} leaves no measurement at all")
-
-
-def _pick(value, default):
-    return default if value is None else value
-
-
-def _plain(obj):
-    """numpy scalars and arrays to plain Python, so tables and summaries can go straight to JSON."""
-    if isinstance(obj, dict):
-        return {k: _plain(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_plain(v) for v in obj]
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, np.generic):
-        return obj.item()
-    return obj
-
-
-def _result(sid: str, data: dict, table: list[dict], summary: dict, opts: Options) -> Result:
-    def draw(out_dir, lang=None):
-        return plot.save(sid, data, Path(out_dir), lang or opts.lang or "en")
-    return Result(_plain(table), _plain(summary), draw)
 
 
 # --- the filter on a scenario ---------------------------------------------------------
@@ -330,4 +287,5 @@ SIMS: dict[str, Callable[[Options], Result]] = {
     "12-velocity-learning": _sim_velocity_learning,
     "13-q-r-tradeoff": _sim_tradeoff,
     "14-nis": _sim_nis,
+    **sims2.SIMS,                           # lesson 2: ekf-02-tangent to ekf-09-consistency
 }

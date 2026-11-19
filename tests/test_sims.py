@@ -4,7 +4,7 @@ import struct
 import numpy as np
 import pytest
 
-from fbh import i18n, plot, scenarios, sims
+from fbh import i18n, plot, scenarios, sims, sims2
 
 
 def test_velocity_learning_table_q001():
@@ -152,7 +152,7 @@ def test_nis_q_too_small_spikes_only_around_the_maneuver():
 
 def test_options_default_to_none_and_overrides_are_used():
     o = sims.Options()
-    assert (o.q, o.r, o.gap, o.seed, o.lang) == (None, None, None, None, None)
+    assert (o.q, o.r, o.gap, o.seed, o.sigma_r, o.sigma_theta, o.lang) == (None,) * 7
     a = sims.SIMS["12-velocity-learning"](sims.Options()).summary
     b = sims.SIMS["12-velocity-learning"](sims.Options(q=1.0)).summary
     assert a["std_v_10_30"] < b["std_v_10_30"]
@@ -173,9 +173,13 @@ def test_png_is_1600_by_900_and_named_after_the_sim(tmp_path):
         assert (w, h) == (1600, 900), sid
 
 
-def test_ids_are_the_seven_in_the_brief():
+def test_ids_are_the_thirteen_in_the_brief_lesson_one_first():
     assert list(sims.SIMS) == ["01-fusion", "03-1d-loop", "05-derivative-vs-filter", "08-covariance",
-                               "12-velocity-learning", "13-q-r-tradeoff", "14-nis"]
+                               "12-velocity-learning", "13-q-r-tradeoff", "14-nis",
+                               "ekf-02-tangent", "ekf-03-range-only", "ekf-05-radar-update", "ekf-07-flyby",
+                               "ekf-08-wrap", "ekf-09-consistency"]
+    assert list(sims.SIMS)[7:] == list(sims2.SIMS) and all(sims.SIMS[k] is sims2.SIMS[k] for k in sims2.SIMS)
+    assert list(plot.PLOTS) == list(sims.SIMS)                       # one figure per simulation
 
 
 def test_i18n_has_both_languages_for_every_key_and_rejects_unknown():

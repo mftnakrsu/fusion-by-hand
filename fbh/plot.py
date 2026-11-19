@@ -9,7 +9,7 @@ import matplotlib
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter, MaxNLocator
+from matplotlib.ticker import FuncFormatter, LogLocator, MaxNLocator, NullFormatter
 
 from .i18n import t
 
@@ -156,8 +156,11 @@ def derivative_vs_filter(fig, d, lang):
 # --- 08-covariance ----------------------------------------------------------------------
 
 def _ellipse(P, n=200):
+    """The 2σ ellipse of a 2 x 2 covariance around the origin. Through eigh rather than Cholesky, so that a P
+    squeezed flat (a radar that is almost exact) still draws, as a line."""
     a = np.linspace(0, 2 * np.pi, n)
-    return 2 * np.linalg.cholesky(np.array(P)) @ np.vstack([np.cos(a), np.sin(a)])
+    w, V = np.linalg.eigh(np.array(P, dtype=float))
+    return 2 * (V * np.sqrt(np.clip(w, 0, None))) @ np.vstack([np.cos(a), np.sin(a)])
 
 
 def covariance(fig, d, lang):
@@ -274,6 +277,286 @@ def nis(fig, d, lang):
     fig.suptitle(t("nis_title", lang), x=0.06, ha="left", fontsize=21, fontweight="bold")
 
 
+# --- lesson 2: maps in metres, the radar at the origin -----------------------------------
+
+def _short(value: float, lang: str) -> str:
+    """A computed value on a figure: one decimal at most, none when it is zero (309, 308.9; Turkish 308,9)."""
+    return num(round(float(value), 1), lang)
+
+
+def _vec(values, lang: str) -> str:
+    """A point as printed on a figure, "(300.8, 409.4)"; Turkish "(300,8; 409,4)", so the commas cannot be misread."""
+    return "(" + ("; " if lang == "tr" else ", ").join(_short(v, lang) for v in values) + ")"
+
+
+def _normal(grid, mean, var):
+    return np.exp(-0.5 * (grid - mean) ** 2 / var) / np.sqrt(2 * np.pi * var)
+
+
+def _map(ax, lang: str):
+    _style(ax, lang)
+    ax.set_aspect("equal", adjustable="datalim")                        # one metre east is one metre north
+    ax.set_xlabel(t("east_m", lang))
+    ax.set_ylabel(t("north_m", lang))
+
+
+def _frame(ax, lo, hi):
+    """Show at least the box from lo to hi (east, north) on a map; the panel's shape widens one side.
+
+    Call it after drawing: the box replaces the data limits, so lines that run off the map do not stretch it.
+    """
+    ax.ignore_existing_data_limits = True
+    ax.update_datalim([lo, hi])
+    ax.margins(0)
+    ax.autoscale_view()
+
+
+# --- ekf-02-tangent ---------------------------------------------------------------------
+
+def tangent(fig, d, lang):
+    left, right = fig.subplots(1, 2)
+    near, wide, flat = d["rows"][0], d["rows"][1], d["rows"][2]         # N(300, 10²), N(300, 100²), N(0, 10²)
+    offset = near["offset"]
+    px = np.linspace(-600, 600, 601)
+
+    _style(left, lang)
+    left.axvspan(wide["x_hat"] - 2 * wide["sigma"], wide["x_hat"] + 2 * wide["sigma"], color=TERRACOTTA, alpha=0.10,
+                 lw=0, label=t("tan_belief", lang).format(mean=num(wide["x_hat"], lang), sigma=num(wide["sigma"], lang)))
+    left.plot(px, np.hypot(px, offset), color=INK, lw=3, label=t("tan_curve", lang).format(offset=num(offset, lang)))
+    for row, color, ls in ((near, TERRACOTTA, "-"), (flat, MUTED, "--")):
+        left.plot(px, row["h"] + row["H"] * (px - row["x_hat"]), color=color, ls=ls, lw=2.4,
+                  label=t("tan_at", lang).format(x=num(row["x_hat"], lang), slope=num(row["H"], lang)))
+        left.plot(row["x_hat"], row["h"], marker="o", ms=10, color=color, zorder=4)
+    left.set_xlim(px[0], px[-1])
+    left.set_ylim(offset - 60, 1.06 * np.hypot(px[-1], offset))
+    left.set_xlabel(t("tan_x", lang))
+    left.set_ylabel(t("range_m", lang))
+    left.set_title(t("tan_title_curve", lang))
+    _legend(left, "upper center")
+
+    _style(right, lang, y_ticks=False)
+    edges = np.arange(offset, wide["range"].max() + 2.0, 2.0)          # no range comes out below the offset
+    density, _ = np.histogram(wide["range"], bins=edges, weights=wide["weights"], density=True)
+    mid = (edges[:-1] + edges[1:]) / 2
+    g = np.linspace(wide["lin_mean"] - 4.5 * wide["lin_std"], wide["lin_mean"] + 4.5 * wide["lin_std"], 601)
+    bell = lambda r: _normal(r, wide["lin_mean"], wide["lin_std"] ** 2)
+    right.fill_between(mid, density, color=MUTED, alpha=0.45, lw=0,
+                       label=t("tan_true", lang).format(mean=_short(wide["true_mean"], lang),
+                                                        std=_short(wide["true_std"], lang)))
+    right.plot(g, bell(g), color=TERRACOTTA, lw=3.2,
+               label=t("tan_lin", lang).format(mean=_short(wide["lin_mean"], lang), std=_short(wide["lin_std"], lang)))
+    right.vlines(wide["true_mean"], 0, np.interp(wide["true_mean"], mid, density), color=INK, lw=2)  # the two means
+    right.vlines(wide["lin_mean"], 0, bell(wide["lin_mean"]), color=TERRACOTTA, lw=2, ls="--")
+    right.set_xlim(g[0], g[-1])
+    right.set_ylim(0, 1.3 * max(density.max(), bell(wide["lin_mean"])))
+    right.set_xlabel(t("range_m", lang))
+    right.set_ylabel(t("density", lang))
+    right.set_title(t("tan_title_belief", lang).format(mean=num(wide["x_hat"], lang), sigma=num(wide["sigma"], lang)))
+    _legend(right, "upper right")
+
+
+# --- ekf-03-range-only ------------------------------------------------------------------
+
+def range_only(fig, d, lang):
+    ax = fig.add_subplot()
+    _style(ax, lang, y_ticks=False)
+    x0, P0 = d["x_minus"], d["P_minus"]
+    lo, hi = x0 - 2 * np.sqrt(P0), x0 + 3 * np.sqrt(P0)
+    g = np.linspace(lo, hi, 1001)
+    var_word = t("variance", lang)
+    ax.plot(g, _normal(g, x0, P0), color=TERRACOTTA, ls="--", lw=2.2,
+            label=f"{t('prediction', lang)}: {num(x0, lang)} ({var_word} {num(P0, lang)})")
+    keep = (d["grid"] >= lo) & (d["grid"] <= hi)
+    step = max(1, int(keep.sum()) // 2000)                              # the grid is far finer than the pixels
+    grid = d["grid"][keep][::step]
+    density = d["posterior"][keep][::step] / (d["grid"][1] - d["grid"][0])   # grid weights to a density
+    ax.fill_between(grid, density, color=MUTED, alpha=0.45, lw=0,
+                    label=f"{t('exact', lang)}: {_short(d['exact_mean'], lang)} ({var_word} {_short(d['exact_var'], lang)})")
+    ax.plot(g, _normal(g, d["x_plus"], d["P_plus"]), color=TERRACOTTA, lw=3.4,
+            label=f"EKF: {_short(d['x_plus'], lang)} ({var_word} {_short(d['P_plus'], lang)})")
+    alone = float(np.sqrt(d["z"] ** 2 - d["offset"] ** 2))             # where the reading puts p_x on its own
+    ax.axvline(alone, color=BLUE, ls=":", lw=2.6, label=t("ro_reading", lang).format(
+        z=num(d["z"], lang), offset=num(d["offset"], lang), x=_short(alone, lang)))
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(0, None)
+    ax.set_xlabel(t("ro_x", lang))
+    ax.set_ylabel(t("density", lang))
+    ax.set_title(t("ro_title", lang).format(z=num(d["z"], lang), sigma_r=num(np.sqrt(d["R"]), lang)))
+    _legend(ax, "upper left")
+
+
+# --- ekf-05-radar-update ----------------------------------------------------------------
+
+def radar_update(fig, d, lang):
+    ax, side = fig.subplots(1, 2, width_ratios=[1.45, 1])
+    _map(ax, lang)
+    xm, xp, z, report = (np.asarray(d[key]) for key in ("x_minus", "x_plus", "z", "reading_xy"))
+    two_sigma, ring = 2 * d["prior_sigma"], np.linspace(0, 2 * np.pi, 200)
+    ellipse = xp[:, None] + _ellipse(d["P_plus"])
+    r_hat = float(np.hypot(*xm))
+    along = np.array([-1, 1]) * 4 * two_sigma                           # long enough to cross the whole map
+    ax.plot(xm[0] / r_hat * (r_hat + along), xm[1] / r_hat * (r_hat + along), color=INK, ls=":", lw=2)
+    arc = z[1] + np.linspace(along[0], along[1], 200) / z[0]
+    ax.plot(z[0] * np.cos(arc), z[0] * np.sin(arc), color=BLUE, lw=1.8)
+    ax.plot(np.cos(z[1]) * (z[0] + along), np.sin(z[1]) * (z[0] + along), color=BLUE, lw=1.8)
+    ax.plot(*report, marker="X", ms=17, color=BLUE, zorder=5)
+    ax.plot(xm[0] + two_sigma * np.cos(ring), xm[1] + two_sigma * np.sin(ring), color=TERRACOTTA, ls="--", lw=2.2)
+    ax.plot(*xm, marker="o", ms=12, mfc=PAPER, mec=TERRACOTTA, mew=2.4, zorder=5)
+    ax.plot(*ellipse, color=TERRACOTTA, lw=3.2)
+    ax.plot(*xp, marker="o", ms=10, color=TERRACOTTA, zorder=5)
+    ax.annotate("", xy=xp, xytext=xm, arrowprops={"arrowstyle": "-|>", "color": TERRACOTTA, "lw": 2,
+                                                  "shrinkA": 8, "shrinkB": 6, "mutation_scale": 18})
+    pts = np.column_stack([xm - two_sigma, xm + two_sigma, report, ellipse])
+    pad = 0.2 * np.ptp(pts, axis=1).max()
+    _frame(ax, pts.min(axis=1) - pad, pts.max(axis=1) + pad)
+    ax.set_title(t("ru_title", lang))
+
+    side.axis("off")
+    handles = [
+        Line2D([], [], color=TERRACOTTA, ls="--", lw=2.2, marker="o", ms=11, mfc=PAPER, mec=TERRACOTTA, mew=2.4,
+               label=t("ru_prediction", lang).format(x=_vec(xm, lang))),
+        Line2D([], [], ls="none", marker="X", ms=15, color=BLUE,
+               label=t("ru_report", lang).format(r=_short(z[0], lang), theta=num(z[1], lang, 4))),
+        Line2D([], [], color=BLUE, lw=1.8, label=t("ru_circle_line", lang)),
+        Line2D([], [], color=TERRACOTTA, lw=3.2, marker="o", ms=10, label=t("ru_corrected", lang).format(x=_vec(xp, lang))),
+        Line2D([], [], color=INK, ls=":", lw=2, label=t("line_of_sight", lang)),
+    ]
+    side.legend(handles=handles, loc="upper left", handlelength=2.4, labelspacing=1.0, borderaxespad=0)
+    side.text(0, 0.12, t("ru_variances", lang).format(along=_short(d["var_along"], lang),
+                                                      across=_short(d["var_across"], lang),
+                                                      prior=num(d["prior_sigma"] ** 2, lang)),
+              transform=side.transAxes, va="bottom", fontsize=16, linespacing=1.6)
+
+
+# --- ekf-07-flyby -----------------------------------------------------------------------
+
+def flyby(fig, d, lang):
+    left, right = fig.subplots(1, 2, width_ratios=[1.2, 1])
+    p, x, raw = np.array(d["scn"]["p"]), np.array(d["run"]["x"]), np.asarray(d["raw"])
+
+    _map(left, lang)
+    left.plot(0, 0, marker="^", ms=15, color=INK, ls="none", label=t("radar", lang), zorder=5)
+    left.plot(p[:, 0], p[:, 1], color=INK, ls="--", lw=1.8, label=t("true_path", lang))
+    left.plot(raw[:, 0], raw[:, 1], ls="none", marker="o", ms=6, color=BLUE, alpha=0.8, mew=0, label=t("reports", lang))
+    left.plot(x[:, 0], x[:, 1], color=TERRACOTTA, lw=2.4, label=t("ekf_estimate", lang))
+    _frame(left, (p[:, 0].min() - 60, -60), (p[:, 0].max() + 60, p[:, 1].max() + 60))
+    left.set_title(t("fb_title_map", lang).format(north=num(p[0, 1], lang)))
+    _legend(left, "lower center", ncols=2, columnspacing=1.6)
+
+    _style(right, lang, int_x=True)
+    k = np.arange(1, len(p) + 1)
+    right.fill_between(k, 0, 2 * np.asarray(d["claimed"]), color=TERRACOTTA, alpha=0.15, lw=0, label=t("fb_band", lang))
+    right.plot(k, d["raw_error"], ls="none", marker="o", ms=6, color=BLUE,
+               label=t("fb_raw", lang).format(rms=_short(d["rms_raw"], lang)))
+    right.plot(k, d["error"], color=TERRACOTTA, lw=2.6, label=t("fb_filter", lang).format(rms=_short(d["rms_filter"], lang)))
+    right.set_xlim(0.5, k[-1] + 0.5)
+    right.set_ylim(0, 1.25 * max(np.max(d["raw_error"]), 2 * np.max(d["claimed"])))
+    right.set_xlabel(t("scan", lang))
+    right.set_ylabel(t("fb_distance", lang))
+    right.set_title(t("fb_title_error", lang))
+    _legend(right, "upper right")
+
+
+# --- ekf-08-wrap ------------------------------------------------------------------------
+
+def _unwrapped_gaps(values):
+    """Scans 1..n and a wrapped angle, with a gap wherever it jumps by more than pi, so no line crosses the axis."""
+    v = np.asarray(values, dtype=float)
+    cut = np.flatnonzero(np.abs(np.diff(v)) > np.pi) + 1
+    return np.insert(np.arange(1.0, len(v) + 1), cut, np.nan), np.insert(v, cut, np.nan)
+
+
+def _mark_exit(ax, track, lang):
+    """Point at the edge where `track` (one [east, north] row per scan) first leaves the map, and name the scan."""
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    on_map = (track[:, 0] > x0) & (track[:, 0] < x1) & (track[:, 1] > y0) & (track[:, 1] < y1)
+    k = int(np.argmin(on_map))                                           # the first scan off the map, 0-based
+    if on_map.all() or k == 0:
+        return
+    a, b = track[k - 1], track[k]
+    s = min((lim - a[i]) / (b[i] - a[i]) for i, lims in ((0, (x0, x1)), (1, (y0, y1))) for lim in lims
+            if b[i] != a[i] and 0 < (lim - a[i]) / (b[i] - a[i]) <= 1)
+    edge = a + s * (b - a)                                               # where the segment crosses the frame
+    east, north = (edge[0] - x0) / (x1 - x0) > 0.6, (edge[1] - y0) / (y1 - y0) > 0.5
+    note = ax.annotate(t("wr_leaves", lang).format(k=k + 1), xy=edge, textcoords="offset points",
+                       xytext=(-20 if east else 20, -40 if north else 40), ha="right" if east else "left",
+                       va="top" if north else "bottom", color=GREEN, fontsize=15,
+                       arrowprops={"arrowstyle": "-|>", "color": GREEN, "lw": 1.6})
+    note.set_in_layout(False)                                            # it lies inside the map
+
+
+def wrap(fig, d, lang):
+    left, right = fig.subplots(1, 2)
+    p = np.array(d["scn"]["p"])
+    good, bad = (np.array(d[run]["x"])[:, :2] for run in ("wrapped_run", "plain_run"))
+
+    _map(left, lang)
+    west = p[:, 0].min() - 60
+    left.plot(0, 0, marker="^", ms=15, color=INK, ls="none", label=t("radar", lang), zorder=5)
+    left.plot([west - 1000, 0], [0, 0], color=MUTED, ls=":", lw=2.2, label=t("wr_cut", lang))
+    left.plot(p[:, 0], p[:, 1], color=INK, ls="--", lw=1.8, label=t("true_path", lang))
+    left.plot(*good.T, color=TERRACOTTA, lw=2.6, marker="o", ms=5, zorder=3,
+              label=t("wr_with", lang).format(error=_short(d["max_error_wrapped"], lang)))
+    left.plot(*bad.T, color=GREEN, lw=2.4, marker="o", ms=5,
+              label=t("wr_without", lang).format(error=_short(d["max_error_plain"], lang)))
+    _frame(left, (west, p[:, 1].min() - 60), (60, p[:, 1].max() + 60))  # the path and the radar, not the lost track
+    left.set_title(t("wr_title_map", lang))
+    _legend(left, "best")                                                # clear of the lost track, wherever it goes
+
+    _style(right, lang, int_x=True)
+    z, z_hat = np.array(d["wrapped_run"]["z"])[:, 1], np.array(d["wrapped_run"]["z_hat"])[:, 1]
+    right.plot(*_unwrapped_gaps(z_hat), color=TERRACOTTA, lw=2.6, label=t("wr_expected", lang))
+    right.plot(np.arange(1, len(z) + 1), z, ls="none", marker="o", ms=8, color=BLUE, label=t("wr_reported", lang), zorder=4)
+    k = d["jump_scan"]
+    if k is None:
+        right.text(0.5, 0.5, t("wr_no_jump", lang), transform=right.transAxes, ha="center", va="center", fontsize=15)
+    else:
+        right.annotate("", xy=(k, d["z_theta"]), xytext=(k, d["z_hat_theta"]),
+                       arrowprops={"arrowstyle": "-|>", "color": INK, "lw": 1.6, "shrinkA": 7, "shrinkB": 7})
+        jump = t("wr_jump", lang).format(k=k, raw=num(d["raw"], lang, 4), wrapped=num(d["wrapped"], lang, 4))
+        roomy_right = len(z) + 0.5 - k >= k - 0.5                       # write the numbers on the wider side
+        right.text(k + 0.8 if roomy_right else k - 0.8, 0, jump, ha="left" if roomy_right else "right", va="center",
+                   fontsize=15, linespacing=1.5)
+    right.set_yticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi], ["−π", "−π/2", "0", "π/2", "π"])
+    right.set_ylim(-np.pi - 0.25, np.pi + 0.25)
+    right.set_xlim(0.5, len(z) + 0.5)
+    right.set_xlabel(t("scan", lang))
+    right.set_ylabel(t("wr_bearing", lang))
+    right.set_title(t("wr_title_bearing", lang))
+    _legend(right, "upper right", bbox_to_anchor=(1, 0.86))             # below the readings near +pi
+
+    fig.draw_without_rendering()                                         # the layout and the equal scale settle here
+    _mark_exit(left, bad, lang)
+
+
+# --- ekf-09-consistency -----------------------------------------------------------------
+
+def consistency(fig, d, lang):
+    axes = fig.subplots(2, 2, sharex=True, sharey=True)
+    for ax, (name, c) in zip(axes.ravel(), d["cases"].items()):
+        _style(ax, lang, int_x=True)
+        k = np.arange(1, len(c["rms"]) + 1)
+        ax.plot(k, c["rms"], color=TERRACOTTA, lw=2.6)
+        ax.plot(k, c["claimed"], color=INK, ls="--", lw=2)
+        ax.set_title(t("cs_panel", lang).format(name=t(f"cs_{name}", lang), bend=_short(c["bend"], lang),
+                                                sigma_r=num(c["sigma_r"], lang)), fontsize=16, pad=8)
+    ax.set_yscale("log")                                                 # shared by all four panels
+    ax.yaxis.set_major_locator(LogLocator(subs=(1.0, 2.0, 5.0)))
+    ax.yaxis.set_major_formatter(FuncFormatter(tick_formatter(lang)))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    for ax in axes.ravel():
+        ax.tick_params(which="minor", length=0)
+    for ax in axes[1]:
+        ax.set_xlabel(t("scan", lang))
+    for ax in axes[:, 0]:
+        ax.set_ylabel(t("cs_error", lang))
+    axes[0, 0].set_xlim(1, len(k))
+    handles = [Line2D([], [], color=TERRACOTTA, lw=2.6, label=t("cs_rms", lang).format(runs=d["runs"])),
+               Line2D([], [], color=INK, ls="--", lw=2, label=t("cs_claimed", lang))]
+    axes[0, 1].legend(handles=handles, loc="upper right", fontsize=14)
+    fig.suptitle(t("cs_title", lang), x=0.06, ha="left", fontsize=21, fontweight="bold")
+
+
 PLOTS = {
     "01-fusion": fusion,
     "03-1d-loop": one_d_loop,
@@ -282,6 +565,12 @@ PLOTS = {
     "12-velocity-learning": velocity_learning,
     "13-q-r-tradeoff": tradeoff,
     "14-nis": nis,
+    "ekf-02-tangent": tangent,
+    "ekf-03-range-only": range_only,
+    "ekf-05-radar-update": radar_update,
+    "ekf-07-flyby": flyby,
+    "ekf-08-wrap": wrap,
+    "ekf-09-consistency": consistency,
 }
 
 

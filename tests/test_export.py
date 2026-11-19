@@ -124,11 +124,15 @@ def test_nis_json_has_the_three_series_their_means_and_the_bound(out):
     assert s["q_small_inside_mean"] > 3 * s["q_small_outside_mean"]
 
 
-def test_cli_export_command(tmp_path, capsys):
-    assert main(["export", str(tmp_path / "new" / "dir")]) in (0, None)
-    assert (tmp_path / "new" / "dir" / "tracking.json").exists()
+LESSON_ONE_FILES = ["covariance.json", "derivative.json", "kf-cases.json", "nis.json", "tracking.json"]
+
+
+@pytest.mark.parametrize("flags", [[], ["--lesson", "1"]])
+def test_cli_export_command_writes_lesson_one_by_default(tmp_path, capsys, flags):
+    assert main(["export", str(tmp_path / "new" / "dir"), *flags]) in (0, None)
+    assert sorted(p.name for p in (tmp_path / "new" / "dir").iterdir()) == LESSON_ONE_FILES
     printed = capsys.readouterr().out
-    assert "kf-cases.json" in printed and "tracking.json" in printed
+    assert all(name in printed for name in LESSON_ONE_FILES) and "flyby.json" not in printed
 
 
 # --- the README's "Export format" is enough to write a port -------------------------------
@@ -136,6 +140,12 @@ def test_cli_export_command(tmp_path, capsys):
 def readme_section(title):
     text = (ROOT / "README.md").read_text()
     return re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", text, re.M | re.S).group(1)
+
+
+def readme_lesson_one():
+    """README "Export format", the part about lesson 1 only (lesson 2 has its own, checked in test_export2.py)."""
+    part = readme_section("Export format").split("### Lesson 1\n")[1]
+    return part.split("### Lesson 2\n")[0]
 
 
 def port_from_the_readme(t, q, r, gap):
@@ -170,7 +180,7 @@ def test_a_port_written_only_from_the_readme_reproduces_every_case_to_1e_9(out):
 
 
 def test_readme_export_section_describes_every_file_and_key_and_the_semantics(out):
-    section = readme_section("Export format")
+    section = readme_lesson_one()
     for name in ("tracking.json", "kf-cases.json", "derivative.json", "covariance.json", "nis.json"):
         assert f"`{name}`" in section, name
         top = load(out, name)
