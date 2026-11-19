@@ -65,13 +65,16 @@ measurements, and for `14-nis` some of frames 200 to 219 as well.
 The model, with the state [position, velocity] and one frame per time step:
 
 - F = [[1, 1], [0, 1]], H = [1, 0], R = r, Q = q * [[1/3, 1/2], [1/2, 1]].
-- Frames are 1-based. `noise` is unit normal and the measurement of frame k is z = p[k] + sqrt(r) * noise[k].
+- Frames are 1-based, but the JSON arrays are 0-based: the array index is frame - 1. `noise` is unit normal and the
+  measurement of frame k is z = p[k - 1] + sqrt(r) * noise[k - 1]. `gap` and `maneuver` are frame numbers (1-based).
 - Start from the frame-0 prior `x0`, `P0`. Every frame, frame 1 included, first predicts: x = F x, P = F P Fᵀ + Q.
 - Then, unless the frame is in the gap, it updates: y = z - H x, S = H P Hᵀ + R, K = P Hᵀ / S, x = x + K y,
   P = (I - K H) P. That is the plain form, not Joseph, and P is not symmetrised afterwards.
-- A gap `[a, b]` is inclusive: frames a to b are predict-only. There is no measurement, so z, y, S, K and NIS are
-  `null` there, and x, P are the prediction.
-- `x` and `P` in `kf-cases.json` are after the update (the prediction in a gap frame).
+- A gap `[a, b]` is inclusive: frames a to b are predict-only. There is no measurement there, so z, y, S, K and NIS do
+  not exist, and x, P are the prediction.
+- `kf-cases.json` exports only x, P and K, one entry per frame (index = frame - 1). `x` and `P` are after the update
+  (the prediction in a gap frame); `K` is `null` in a gap frame. There are no z, y, S or NIS arrays: z comes from
+  `tracking.json` as above, y and S you compute while filtering.
 - Floats agree to about 1e-9 relative, not bit for bit: compare with a tolerance. P is symmetric only up to the last digits.
 
 The files (compact JSON; `tracking.json` and `kf-cases.json` at full float precision, the others at 10 digits):
@@ -92,11 +95,12 @@ The files (compact JSON; `tracking.json` and `kf-cases.json` at full float preci
   `bound`, `honest_mean`, `overconfident_mean`, `q_small_mean`, `q_small_inside_mean`, `q_small_outside_mean`,
   `honest_above`, `overconfident_above`, `q_small_above`).
 
-## Every number in the essay comes from these scripts
+## Every simulated number and every simulation figure comes from these scripts
 
-Each number in the essay is either printed by `fbh run` or pinned by a test in `tests/`. The seeds are fixed, so you get
-the same numbers as the essay. If a number in the text and a number you get ever disagree, one of
-them is a bug, so please open an issue.
+Each simulated number in the essay is either printed by `fbh run` or pinned by a test in `tests/`, and each simulation
+figure is drawn from these scripts' output. The seeds are fixed, so you get the same numbers as the essay. A few small
+tables in the essay are illustrative, hand-worked examples with made-up numbers; the essay says so where they appear.
+If a simulated number in the text and a number you get ever disagree, one of them is a bug, so please open an issue.
 
 ```sh
 uv run pytest -q

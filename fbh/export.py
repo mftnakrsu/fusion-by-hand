@@ -6,17 +6,19 @@ at full float precision; the figures' display data (derivative, covariance, nis)
 README.md, section "Export format", is the same text with all the keys; a test writes a filter from
 that wording alone and checks it against kf-cases.json.
 
-What a port must do (state = [position, velocity], dt = 1, frames are 1-based):
+What a port must do (state = [position, velocity], dt = 1, frames are 1-based, JSON arrays are 0-based:
+the array index is frame - 1):
 
 - F = [[1, 1], [0, 1]], H = [1, 0], R = r, Q = q * [[1/3, 1/2], [1/2, 1]].
-- `noise` in tracking.json is unit normal; the measurement of frame k is z = p[k] + sqrt(r) * noise[k].
+- `noise` in tracking.json is unit normal; the measurement of frame k is z = p[k - 1] + sqrt(r) * noise[k - 1].
 - Start from the frame-0 prior x0, P0. Every frame, frame 1 included, first predicts:
   x = F x, P = F P Fᵀ + Q.
 - Then, unless the frame is in the gap, updates: y = z - H x, S = H P Hᵀ + R, K = P Hᵀ / S,
   x = x + K y, P = (I - K H) P (the plain form, not Joseph, and P is not symmetrised afterwards).
-- `gap` [a, b] is inclusive: frames a to b are predict-only, so z, y, S, K and NIS are null there
-  (K is null in kf-cases.json) and x, P are the prediction.
-- x and P in kf-cases.json are after the update (the prediction in a gap frame).
+- `gap` [a, b] is inclusive: frames a to b are predict-only, so z, y, S, K and NIS do not exist there
+  and x, P are the prediction.
+- kf-cases.json exports only x, P and K, one entry per frame (index = frame - 1); there are no z, y, S or
+  NIS arrays. x and P are after the update (the prediction in a gap frame); K is null in a gap frame.
 - Floats agree to about 1e-9 relative, not bit for bit; compare with a tolerance (P comes out
   symmetric only up to the last digits).
 """
