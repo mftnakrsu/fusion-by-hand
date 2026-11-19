@@ -299,7 +299,7 @@ def test_anchor_follows_the_site_rule():
 def test_anchor_drops_turkish_letters_like_the_site():
     assert registry.anchor("1. İki ölçümü birleştirmek") == "1-iki-lm-birletirmek"      # İ -> i, the rest dropped
     assert registry.anchor("5. Hız neden durumun içinde olmalı?") == "5-hz-neden-durumun-iinde-olmal"
-    assert registry.anchor("13. Q ve R'yi ayarlamak") == "13-q-ve-ryi-ayarlamak"
+    assert registry.anchor("13. Q ve R’yi ayarlamak") == "13-q-ve-ryi-ayarlamak"
     assert registry.anchor("14. Filtre dürüst mü? NIS testi") == "14-filtre-drst-m-nis-testi"
 
 

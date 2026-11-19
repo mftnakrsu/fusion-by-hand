@@ -40,7 +40,7 @@ LESSONS = (
         Entry("12-velocity-learning", ("the filter learns a speed it never measures", "filtre hiç ölçmediği hızı öğrenir"),
               "12. Python from scratch", "12. Python ile sıfırdan", ("q", "r", "seed")),
         Entry("13-q-r-tradeoff", ("tuning Q and R: calm or agile", "Q ve R ayarı: sakin mi çevik mi"),
-              "13. Tuning Q and R", "13. Q ve R'yi ayarlamak", ("q", "r", "gap", "seed")),
+              "13. Tuning Q and R", "13. Q ve R’yi ayarlamak", ("q", "r", "gap", "seed")),
         Entry("14-nis", ("is the filter honest? the NIS test", "filtre dürüst mü? NIS testi"),
               "14. Is the filter honest? The NIS test", "14. Filtre dürüst mü? NIS testi",
               ("q", "r", "gap", "seed")),
