@@ -60,6 +60,20 @@ LESSONS = (
         Entry("ekf-09-consistency", ("where the tangent fails: four cases", "teğet nerede yetmez: dört durum"),
               "9. Where the tangent fails", "9. Teğet nerede yetmez?", ("seed",)),
     )),
+    Lesson(3, ("UKF", "UKF"),
+           (ESSAYS + "fusion-03-unscented-kalman-filter", ESSAYS + "fusion-03-unscented-kalman-filter-tr"), (
+        Entry("ukf-02-icd-decode", ("decode one LOS message of the example ICD", "örnek ICD'nin bir LOS mesajını çöz"),
+              "2. Reading an ICD", "2. Bir ICD okumak", ()),
+        Entry("ukf-03-square", ("a belief through y = x²: tangent, three points, truth",
+                                "bir inanç y = x²'den geçiyor: teğet, üç nokta, gerçek"),
+              "3. A belief through a curve", "3. Bir inanç eğriden geçince", ()),
+        Entry("ukf-05-sigma-points", ("sigma points in one and two dimensions", "bir ve iki boyutta sigma noktaları"),
+              "5. Sigma points", "5. Sigma noktaları", ()),
+        Entry("ukf-07-radar-update", ("one UKF update with the range alone", "yalnız menzille bir UKF güncellemesi"),
+              "7. One radar update by hand", "7. Elle bir radar güncellemesi", ("sigma_r",)),
+        Entry("ukf-08-wide-belief", ("a wide belief: EKF and UKF part ways", "geniş bir inanç: EKF ile UKF ayrışıyor"),
+              "8. When the belief is wide", "8. İnanç genişken", ("sigma_r",)),
+    )),
 )
 
 

@@ -2,11 +2,14 @@
 
 Companion code for **Sensor Fusion from First Principles**, a course on [mefby.com](https://www.mefby.com/essays/fusion).
 Lesson 1 builds a Kalman filter from scratch, with the numbers worked out by hand first. Lesson 2 takes it to a radar
-that measures range and bearing, which no fixed matrix H can describe: the extended Kalman filter (EKF). This
-repository holds both filters (`fbh/kf.py` and `fbh/ekf.py`, plain numpy), the seeded simulations behind every figure,
-and a small command line tool, `fbh`, that runs them and tells you where you are in the course. The essays are also
-available in Turkish ([lesson 1](https://www.mefby.com/essays/fusion-01-kalman-filter-tr),
-[lesson 2](https://www.mefby.com/essays/fusion-02-extended-kalman-filter-tr)); `list`, `where` and `run` take
+that measures range and bearing, which no fixed matrix H can describe: the extended Kalman filter (EKF). Lesson 3
+replaces the EKF's tangent with a few chosen points pushed through the curve itself: the unscented Kalman filter
+(UKF), its sigma points and its update. This repository holds the filters (`fbh/kf.py`, `fbh/ekf.py` and
+`fbh/ukf.py`, plain numpy), the seeded simulations behind every figure, and a small command line tool, `fbh`, that
+runs them and tells you where you are in the course. The essays are also available in Turkish
+([lesson 1](https://www.mefby.com/essays/fusion-01-kalman-filter-tr),
+[lesson 2](https://www.mefby.com/essays/fusion-02-extended-kalman-filter-tr),
+[lesson 3](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter-tr)); `list`, `where` and `run` take
 `--lang tr`.
 
 ## Quick start
@@ -63,6 +66,22 @@ Each id is one simulation, tied to a section of [the essay](https://www.mefby.co
 What each simulation shows and which numbers to expect is in
 [lesson-02-extended-kalman-filter/README.md](lesson-02-extended-kalman-filter/README.md).
 
+## Lesson 3: unscented Kalman filter
+
+Each id is one simulation, tied to a section of [the essay](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter).
+These are single steps worked by hand, so `fbh run` prints their table as well as the summary.
+
+| id | what it shows | essay section |
+|---|---|---|
+| `ukf-02-icd-decode` | decode one LOS message of the example ICD | [2. Reading an ICD](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter#2-reading-an-icd) |
+| `ukf-03-square` | a belief through y = x²: tangent, three points, truth | [3. A belief through a curve](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter#3-a-belief-through-a-curve) |
+| `ukf-05-sigma-points` | sigma points in one and two dimensions | [5. Sigma points](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter#5-sigma-points) |
+| `ukf-07-radar-update` | one UKF update with the range alone | [7. One radar update by hand](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter#7-one-radar-update-by-hand) |
+| `ukf-08-wide-belief` | a wide belief: EKF and UKF part ways | [8. When the belief is wide](https://www.mefby.com/essays/fusion-03-unscented-kalman-filter#8-when-the-belief-is-wide) |
+
+What each simulation shows and which numbers to expect is in
+[lesson-03-unscented-kalman-filter/README.md](lesson-03-unscented-kalman-filter/README.md).
+
 ## The commands
 
 ```
@@ -79,10 +98,10 @@ radians, more than 0), `--seed`, `--lang en|tr`, `--out <dir>` (default `out`). 
 uses the essay's own value. A simulation only reads the options it has a use for and says so on stderr when you pass
 another. `--gap` is read by `13-q-r-tradeoff` (60 frames) and `14-nis` (400 frames); it has to fit in those frames and
 leave measurements, and for `14-nis` some of frames 200 to 219 as well. Lesson 2 builds its R from the radar's two
-sigmas, R = diag(sigma_r², sigma_theta²), so it reads neither `--r` nor `--gap`. `--sigma-r` is read by
-`ekf-03-range-only`, `ekf-05-radar-update`, `ekf-07-flyby` and `ekf-08-wrap`. `--sigma-theta` is read by
-`ekf-05-radar-update`, `ekf-07-flyby` and `ekf-08-wrap`. In `ekf-07-flyby` and `ekf-08-wrap`, `--q` is the tracker's
-process noise intensity in m²/s³.
+sigmas, R = diag(sigma_r², sigma_theta²), so it reads neither `--r` nor `--gap`; lesson 3's range-only updates use
+R = sigma_r². `--sigma-r` is read by `ekf-03-range-only`, `ekf-05-radar-update`, `ekf-07-flyby`, `ekf-08-wrap`,
+`ukf-07-radar-update` and `ukf-08-wide-belief`. `--sigma-theta` is read by `ekf-05-radar-update`, `ekf-07-flyby` and
+`ekf-08-wrap`. In `ekf-07-flyby` and `ekf-08-wrap`, `--q` is the tracker's process noise intensity in m²/s³.
 
 ## Export format
 

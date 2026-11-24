@@ -129,6 +129,44 @@ _TEXT = {
     "cs_rms": ("rms position error over {runs} runs", "{runs} denemede rms konum hatası"),
     "cs_claimed": ("the σ the filter claims", "filtrenin söylediği σ"),
     "cs_error": ("position error (m)", "konum hatası (m)"),
+    # lesson 3: shared legend entries
+    "sigma_points": ("sigma points", "sigma noktaları"),
+    "ukf_estimate": ("UKF", "UKF"),
+    "weight": ("weight", "ağırlık"),
+    # ukf-02-icd-decode
+    "icd_title": ("One LOS message of EOTS-X, a made-up ICD: 32 bytes, big-endian",
+                  "EOTS-X'in bir LOS mesajı (uydurma bir ICD): 32 bayt, big-endian"),
+    "icd_header": ("header", "başlık"),
+    "icd_payload": ("payload", "yük"),
+    "icd_note": ("byte offsets from 0 · the CRC that follows on the wire is not shown",
+                 "bayt sırası 0'dan · hatta ardından gelen CRC gösterilmiyor"),
+    # ukf-03-square
+    "sq_title_curve": ("x ~ N({mu}, {var}) through y = x²", "x ~ N({mu}, {var}), y = x²'den geçiyor"),
+    "sq_title_density": ("What comes out, and three answers", "Çıkan dağılım ve üç cevap"),
+    "sq_curve": ("y = x²", "y = x²"),
+    "sq_tangent": ("tangent at x = {mu}", "x = {mu} noktasında teğet"),
+    "sq_belief": ("belief {mu} ± {sigma} (±2σ band)", "inanç {mu} ± {sigma} (±2σ bandı)"),
+    "sq_true": ("the truth: mean {mean}, variance {var}", "gerçek: ortalama {mean}, varyans {var}"),
+    "sq_ekf": ("tangent (EKF): mean {mean}, variance {var}", "teğet (EKF): ortalama {mean}, varyans {var}"),
+    "sq_ukf": ("three points (UKF): mean {mean}, variance {var}", "üç nokta (UKF): ortalama {mean}, varyans {var}"),
+    # ukf-05-sigma-points
+    "sp_title_1d": ("N({mu}, {var}): three points", "N({mu}, {var}): üç nokta"),
+    "sp_title_round": ("100 I: five points", "100 I: beş nokta"),
+    "sp_title_tilted": ("The tilted P⁺ of lesson 2", "2. dersin eğik P⁺'sı"),
+    "sp_position": ("position (m)", "konum (m)"),
+    "sp_contour": ("√3 σ contour: where the points sit", "√3 σ eğrisi: noktaların durduğu yer"),
+    "sp_cholesky": ("Cholesky square root", "Cholesky karekökü"),
+    "sp_axes": ("square root along the axes", "eksenler boyunca karekök"),
+    "sp_mean": ("mean, weight {w}", "ortalama, ağırlık {w}"),
+    "sp_others": ("the others, weight {w} each", "diğerleri, her biri {w} ağırlık"),
+    # ukf-07-radar-update, ukf-08-wide-belief
+    "uu_title_curve": ("Three points through the range curve", "Üç nokta menzil eğrisinden geçiyor"),
+    "uu_title_post": ("After the reading {z} m: x⁻ = {x} ± {sigma} m, σᵣ = {sigma_r} m",
+                      "{z} m ölçümünden sonra: x⁻ = {x} ± {sigma} m, σᵣ = {sigma_r} m"),
+    "uu_curve": ("range r = √(x² + {offset}²)", "menzil r = √(x² + {offset}²)"),
+    "uu_reading": ("the reading z = {z} m", "ölçüm z = {z} m"),
+    "uu_z_hat": ("the points' mean ẑ = {z_hat} m", "noktaların ortalaması ẑ = {z_hat} m"),
+    "uu_x": ("position x along the line (m)", "hat boyunca konum x (m)"),
 }
 
 LANGS = ("en", "tr")
