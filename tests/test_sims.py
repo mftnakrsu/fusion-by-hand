@@ -4,7 +4,7 @@ import struct
 import numpy as np
 import pytest
 
-from fbh import i18n, plot, scenarios, sims, sims2
+from fbh import i18n, plot, scenarios, sims, sims2, sims3
 
 
 def test_velocity_learning_table_q001():
@@ -173,12 +173,15 @@ def test_png_is_1600_by_900_and_named_after_the_sim(tmp_path):
         assert (w, h) == (1600, 900), sid
 
 
-def test_ids_are_the_thirteen_in_the_brief_lesson_one_first():
+def test_ids_are_the_eighteen_in_the_briefs_lesson_one_first():
     assert list(sims.SIMS) == ["01-fusion", "03-1d-loop", "05-derivative-vs-filter", "08-covariance",
                                "12-velocity-learning", "13-q-r-tradeoff", "14-nis",
                                "ekf-02-tangent", "ekf-03-range-only", "ekf-05-radar-update", "ekf-07-flyby",
-                               "ekf-08-wrap", "ekf-09-consistency"]
-    assert list(sims.SIMS)[7:] == list(sims2.SIMS) and all(sims.SIMS[k] is sims2.SIMS[k] for k in sims2.SIMS)
+                               "ekf-08-wrap", "ekf-09-consistency",
+                               "ukf-02-icd-decode", "ukf-03-square", "ukf-05-sigma-points", "ukf-07-radar-update",
+                               "ukf-08-wide-belief"]
+    assert list(sims.SIMS)[7:13] == list(sims2.SIMS) and all(sims.SIMS[k] is sims2.SIMS[k] for k in sims2.SIMS)
+    assert list(sims.SIMS)[13:] == list(sims3.SIMS) and all(sims.SIMS[k] is sims3.SIMS[k] for k in sims3.SIMS)
     assert list(plot.PLOTS) == list(sims.SIMS)                       # one figure per simulation
 
 

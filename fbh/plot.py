@@ -6,6 +6,7 @@ is involved. Turkish figures use decimal commas in tick labels and in every numb
 from pathlib import Path
 
 import matplotlib
+import matplotlib.patches
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -557,6 +558,185 @@ def consistency(fig, d, lang):
     fig.suptitle(t("cs_title", lang), x=0.06, ha="left", fontsize=21, fontweight="bold")
 
 
+# --- lesson 3 ---------------------------------------------------------------------------
+
+def _gauss_label(key, mean, var, lang):
+    return t(key, lang).format(mean=_short(mean, lang), var=_short(var, lang))
+
+
+# --- ukf-02-icd-decode ------------------------------------------------------------------
+
+def _icd_value(row, d, lang):
+    """A decoded field as written under its bytes: the angle with its degrees, a number with its unit."""
+    v, unit = row["value"], row["unit"]
+    if row["field"] in ("az", "el"):
+        return f"{num(v, lang, 4)} rad = {num(d[row['field'] + '_deg'], lang, 2)}°"
+    if isinstance(v, float):
+        return f"{num(v, lang, 4)} {unit}"
+    return f"{v} {unit}".strip()                                         # a whole number has no decimal to localise
+
+
+def icd(fig, d, lang):
+    ax = fig.add_subplot()
+    ax.axis("off")
+    msg, colors = d["message"], (BLUE_LIGHT, "#e3b494")
+    for k, row in enumerate(d["rows"]):
+        first, last = (int(b) for b in (row["bytes"].split("-") * 2)[:2])
+        line, col = divmod(first, 8)
+        y = -1.25 * line
+        for b in range(first, last + 1):
+            ax.add_patch(matplotlib.patches.Rectangle((b % 8 + 0.04, y), 0.92, 1, color=colors[k % 2], alpha=0.55, lw=0))
+            ax.text(b % 8 + 0.5, y + 0.78, f"{msg[b]:02x}", ha="center", va="center", fontsize=18, family="DejaVu Sans Mono")
+        mid = (first + last + 1) / 2 - 8 * line
+        ax.text(mid, y + 0.45, row["field"], ha="center", va="center", fontsize=15, fontweight="bold")
+        ax.text(mid, y + 0.17, _icd_value(row, d, lang), ha="center", va="center", fontsize=14)
+    for line in range(4):
+        ax.text(-0.15, -1.25 * line + 0.5, t("icd_header" if line == 0 else "icd_payload", lang), ha="right",
+                va="center", fontsize=15, color=MUTED)
+    ax.text(0, -4.1, t("icd_note", lang), fontsize=14, color=MUTED)
+    ax.set_xlim(-1.4, 8.05)
+    ax.set_ylim(-4.3, 1.1)
+    ax.set_title(t("icd_title", lang))
+
+
+# --- ukf-03-square ----------------------------------------------------------------------
+
+def square(fig, d, lang):
+    left, right = fig.subplots(1, 2)
+    mu, var = d["mu"], d["var"]
+    sigma = np.sqrt(var)
+    x = np.linspace(mu - 3.2 * sigma, mu + 3.2 * sigma, 401)
+
+    _style(left, lang)
+    left.axvspan(mu - 2 * sigma, mu + 2 * sigma, color=TERRACOTTA, alpha=0.10, lw=0,
+                 label=t("sq_belief", lang).format(mu=num(mu, lang), sigma=num(sigma, lang)))
+    left.plot(x, x**2, color=INK, lw=3, label=t("sq_curve", lang))
+    left.plot(x, mu**2 + 2 * mu * (x - mu), color=MUTED, ls="--", lw=2.4, label=t("sq_tangent", lang).format(mu=num(mu, lang)))
+    left.scatter(d["x"], d["y"], s=[900 * w for w in d["w"]], color=TERRACOTTA, zorder=4, label=t("sigma_points", lang))
+    for xi, yi, w in zip(d["x"], d["y"], d["w"]):
+        left.annotate(f"({_short(xi, lang)}; {_short(yi, lang)})" if lang == "tr" else f"({_short(xi, lang)}, {_short(yi, lang)})",
+                      (xi, yi), textcoords="offset points", xytext=(-14, 12), ha="right", fontsize=14)
+    left.set_xlim(x[0], x[-1])
+    left.set_xlabel("x")
+    left.set_ylabel("y")
+    left.set_title(t("sq_title_curve", lang).format(mu=num(mu, lang), var=num(var, lang)))
+    _legend(left, "upper left")
+
+    _style(right, lang, y_ticks=False)
+    y = d["grid"] ** 2
+    edges = np.arange(0, y.max() + 0.25, 0.25)
+    density, _ = np.histogram(y, bins=edges, weights=d["weights"], density=True)
+    g = np.linspace(-10, 24, 681)
+    right.fill_between((edges[:-1] + edges[1:]) / 2, density, color=MUTED, alpha=0.45, lw=0,
+                       label=_gauss_label("sq_true", d["exact_mean"], d["exact_var"], lang))
+    for key, color, ls in (("ekf", MUTED, "--"), ("ukf", TERRACOTTA, "-")):
+        mean, v = d[f"{key}_mean"], d[f"{key}_var"]
+        right.plot(g, _normal(g, mean, v), color=color if key == "ukf" else INK, ls=ls, lw=3 if key == "ukf" else 2.4,
+                   label=_gauss_label(f"sq_{key}", mean, v, lang))
+    right.axvline(d["exact_mean"], color=INK, lw=1.6, ymax=0.72)                 # the true mean, below the legend
+    right.set_xlim(g[0], g[-1])
+    right.set_ylim(0, 1.35 * density.max())
+    right.set_xlabel("y = x²")
+    right.set_ylabel(t("density", lang))
+    right.set_title(t("sq_title_density", lang))
+    _legend(right, "upper right")
+
+
+# --- ukf-05-sigma-points ----------------------------------------------------------------
+
+def _points(ax, X, w, color, marker, label=None, ms=11):
+    ax.plot(X[0, 1:], X[1, 1:], ls="none", marker=marker, ms=ms, color=color, label=label, zorder=4)
+    ax.plot(X[0, 0], X[1, 0], ls="none", marker=marker, ms=ms + 5, color=color, zorder=4)
+
+
+def sigma_points(fig, d, lang):
+    one, round_, tilted = fig.subplots(1, 3, width_ratios=[1.15, 1, 1])
+    X1, w1 = (np.asarray(a) for a in d["sets"]["1d"])
+    mu, var = d["mean_1d"], d["var_1d"]
+    sigma = np.sqrt(var)
+
+    _style(one, lang, y_ticks=False)
+    g = np.linspace(mu - 3.5 * sigma, mu + 3.5 * sigma, 401)
+    one.plot(g, _normal(g, mu, var), color=INK, lw=2.4)
+    one.fill_between(g, _normal(g, mu, var), color=MUTED, alpha=0.15, lw=0)
+    peak = _normal(mu, mu, var)
+    for xi, w in zip(X1[0], w1):
+        one.vlines(xi, 0, 1.2 * peak * w / w1[0], color=TERRACOTTA, lw=4)
+        one.text(xi, 1.2 * peak * w / w1[0] + 0.03 * peak, f"{_short(xi, lang)}\n{t('weight', lang)} {num(w, lang, 3)}",
+                 ha="center", va="bottom", fontsize=13)
+    one.set_xlim(g[0], g[-1])
+    one.set_ylim(0, 1.55 * peak)
+    one.set_xlabel(t("sp_position", lang))
+    one.set_title(t("sp_title_1d", lang).format(mu=num(mu, lang), var=num(var, lang)))
+
+    for ax, name, P, mean in ((round_, "round", d["P_round"], d["mean_round"]),
+                              (tilted, "cholesky", d["P_plus"], d["x_plus"])):
+        _map(ax, lang)
+        mean = np.asarray(mean)
+        ax.plot(*(mean[:, None] + _ellipse(np.asarray(P) * 0.75)), color=INK, lw=1.8, ls=":",
+                label=t("sp_contour", lang))                              # 2 sqrt(3/4) = sqrt(3)
+        X, w = (np.asarray(a) for a in d["sets"][name])
+        _points(ax, X, w, BLUE if name == "cholesky" else TERRACOTTA, "s" if name == "cholesky" else "o",
+                t("sp_cholesky", lang) if name == "cholesky" else None)
+    Xa, wa = (np.asarray(a) for a in d["sets"]["axes"])
+    _points(tilted, Xa, wa, TERRACOTTA, "o", t("sp_axes", lang), ms=10)
+    for ax in (round_, tilted):
+        _frame(ax, np.asarray(ax.dataLim.min) - 6, np.asarray(ax.dataLim.max) + 6)
+    round_.set_title(t("sp_title_round", lang))
+    tilted.set_title(t("sp_title_tilted", lang))
+    handles, _ = tilted.get_legend_handles_labels()
+    w0, wi = num(wa[0], lang, 3), num(wa[1], lang, 3)
+    handles += [Line2D([], [], ls="none", marker="o", ms=15, color=MUTED, label=t("sp_mean", lang).format(w=w0)),
+                Line2D([], [], ls="none", marker="o", ms=10, color=MUTED, label=t("sp_others", lang).format(w=wi))]
+    fig.legend(handles=handles, loc="outside lower center", ncols=3, columnspacing=1.6)
+
+
+# --- ukf-07-radar-update, ukf-08-wide-belief --------------------------------------------
+
+def ukf_update(fig, d, lang):
+    left, right = fig.subplots(1, 2, width_ratios=[1, 1.25])
+    e, x0, P0 = d["ekf"], d["x_minus"], d["P_minus"]
+    s0 = np.sqrt(P0)
+
+    _style(left, lang)
+    x = np.linspace(x0 - 2.6 * s0, x0 + 2.6 * s0, 401)
+    left.plot(x, np.hypot(x, d["offset"]), color=INK, lw=3, label=t("uu_curve", lang).format(offset=num(d["offset"], lang)))
+    left.scatter(d["points"], d["ranges"], s=[900 * w for w in d["weights"]], color=TERRACOTTA, zorder=4,
+                 label=t("sigma_points", lang))
+    left.axhline(d["z"], color=BLUE, ls=":", lw=2.4, label=t("uu_reading", lang).format(z=num(d["z"], lang)))
+    left.axhline(d["z_hat"], color=TERRACOTTA, ls="--", lw=1.8, label=t("uu_z_hat", lang).format(z_hat=_short(d["z_hat"], lang)))
+    left.set_xlim(x[0], x[-1])
+    left.set_xlabel(t("uu_x", lang))
+    left.set_ylabel(t("range_m", lang))
+    left.set_title(t("uu_title_curve", lang))
+    _legend(left, "upper left")
+
+    _style(right, lang, y_ticks=False)
+    spreads = (d["sigma"], d["ekf_sigma"], d["exact_sigma"])
+    means = (d["x_plus"], e["x_plus"], e["exact_mean"])
+    lo, hi = min(means) - 4 * max(spreads), max(means) + 4 * max(spreads)
+    g = np.linspace(lo, hi, 1001)
+    floor = (g[1] - g[0]) ** 2                                          # a bell narrower than one step draws as a spike
+    P_ekf, P_ukf = max(e["P_plus"], floor), max(d["P_plus"], floor)
+    var_word = t("variance", lang)
+    keep = (e["grid"] >= lo) & (e["grid"] <= hi)
+    step = max(1, int(keep.sum()) // 2000)
+    density = e["posterior"][keep][::step] / (e["grid"][1] - e["grid"][0])
+    right.fill_between(e["grid"][keep][::step], density, color=MUTED, alpha=0.45, lw=0,
+                       label=f"{t('exact', lang)}: {_short(e['exact_mean'], lang)} ({var_word} {_short(e['exact_var'], lang)})")
+    right.plot(g, _normal(g, e["x_plus"], P_ekf), color=INK, ls="--", lw=2.4,
+               label=f"EKF: {_short(e['x_plus'], lang)} ({var_word} {_short(e['P_plus'], lang)})")
+    right.plot(g, _normal(g, d["x_plus"], P_ukf), color=TERRACOTTA, lw=3.4,
+               label=f"UKF: {_short(d['x_plus'], lang)} ({var_word} {_short(d['P_plus'], lang)})")
+    right.set_xlim(lo, hi)
+    right.set_ylim(0, 1.3 * max(density.max(), _normal(0, 0, min(P_ekf, P_ukf))))
+    right.set_xlabel(t("uu_x", lang))
+    right.set_ylabel(t("density", lang))
+    right.set_title(t("uu_title_post", lang).format(z=num(d["z"], lang), x=num(x0, lang), sigma=_short(s0, lang),
+                                                    sigma_r=_short(np.sqrt(d["R"]), lang)), fontsize=18)
+    _legend(right, "upper left")
+
+
 PLOTS = {
     "01-fusion": fusion,
     "03-1d-loop": one_d_loop,
@@ -571,6 +751,11 @@ PLOTS = {
     "ekf-07-flyby": flyby,
     "ekf-08-wrap": wrap,
     "ekf-09-consistency": consistency,
+    "ukf-02-icd-decode": icd,
+    "ukf-03-square": square,
+    "ukf-05-sigma-points": sigma_points,
+    "ukf-07-radar-update": ukf_update,
+    "ukf-08-wide-belief": ukf_update,
 }
 
 

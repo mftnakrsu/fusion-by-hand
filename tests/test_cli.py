@@ -6,16 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from fbh import registry, sims, sims2
+from fbh import registry, sims, sims2, sims3
 from fbh.cli import main
 
 ROOT = Path(__file__).resolve().parent.parent
 ESSAY = "https://www.mefby.com/essays/fusion-01-kalman-filter"
 ESSAY2 = "https://www.mefby.com/essays/fusion-02-extended-kalman-filter"
+ESSAY3 = "https://www.mefby.com/essays/fusion-03-unscented-kalman-filter"
 LESSON1 = ["01-fusion", "03-1d-loop", "05-derivative-vs-filter", "08-covariance", "12-velocity-learning",
            "13-q-r-tradeoff", "14-nis"]
 LESSON2 = ["ekf-02-tangent", "ekf-03-range-only", "ekf-05-radar-update", "ekf-07-flyby", "ekf-08-wrap",
            "ekf-09-consistency"]
+LESSON3 = ["ukf-02-icd-decode", "ukf-03-square", "ukf-05-sigma-points", "ukf-07-radar-update", "ukf-08-wide-belief"]
+NEXT_LESSON3 = "Next: ukf-02-icd-decode (decode one LOS message of the example ICD)"
 
 
 @pytest.fixture
@@ -41,11 +44,12 @@ def have_run(progress, ids):
 def test_list_run_where_follow_the_brief(progress, tmp_path, capsys):
     out = run(capsys, "list")
     lines = out.splitlines()
-    assert lines[0] == "LESSON 1 · Kalman filter" and lines[8] == "LESSON 2 · EKF"
-    assert len(lines) == 1 + 7 + 1 + 6
+    assert lines[0] == "LESSON 1 · Kalman filter" and lines[8] == "LESSON 2 · EKF" and lines[15] == "LESSON 3 · UKF"
+    assert len(lines) == 1 + 7 + 1 + 6 + 1 + 5
     assert lines[1] == "  ▶ 01-fusion                fuse two measurements"
     assert lines[9] == "    ekf-02-tangent           a belief through a curve, and its tangent"
-    assert lines[-1] == "    ekf-09-consistency       where the tangent fails: four cases"
+    assert lines[14] == "    ekf-09-consistency       where the tangent fails: four cases"
+    assert lines[-1] == "    ukf-08-wide-belief       a wide belief: EKF and UKF part ways"
     assert "✓" not in out
 
     run(capsys, "run", "01-fusion", "--out", str(tmp_path / "o"))
@@ -74,9 +78,15 @@ def test_where_from_nothing_to_everything(progress, tmp_path, capsys):
     assert "  ▶ ekf-02-tangent  " in run(capsys, "list")
     for sid in LESSON2:
         run(capsys, "run", sid, "--out", str(tmp_path))
-    assert run(capsys, "where") == "Lesson 2 · 6 of 6 simulations run. Lesson 2 is done.\n"
-    assert run(capsys, "where", "--lang", "tr") == "Ders 2 · çalıştırılan simülasyon: 6 / 6. Ders 2 bitti.\n"
-    assert "▶" not in run(capsys, "list") and run(capsys, "list").count("✓") == 13
+    assert run(capsys, "where") == f"Lesson 2 · 6 of 6 simulations run. Lesson 2 is done. {NEXT_LESSON3}.\n"
+    assert run(capsys, "where", "--lang", "tr") == ("Ders 2 · çalıştırılan simülasyon: 6 / 6. Ders 2 bitti. "
+                                                    "Sırada: ukf-02-icd-decode (örnek ICD'nin bir LOS mesajını çöz).\n")
+    assert "  ▶ ukf-02-icd-decode  " in run(capsys, "list")
+    for sid in LESSON3:
+        run(capsys, "run", sid, "--out", str(tmp_path))
+    assert run(capsys, "where") == "Lesson 3 · 5 of 5 simulations run. Lesson 3 is done.\n"
+    assert run(capsys, "where", "--lang", "tr") == "Ders 3 · çalıştırılan simülasyon: 5 / 5. Ders 3 bitti.\n"
+    assert "▶" not in run(capsys, "list") and run(capsys, "list").count("✓") == 18
 
 
 def test_where_and_next_follow_the_lesson_you_are_in(progress, tmp_path, capsys):
@@ -91,28 +101,33 @@ def test_where_and_next_follow_the_lesson_you_are_in(progress, tmp_path, capsys)
     assert run(capsys, "where") == "Lesson 1 · 1 of 7 simulations run. Next: 01-fusion (fuse two measurements).\n"
     have_run(progress, ["ekf-03-range-only", "03-1d-loop"] + [sid for sid in LESSON2[2:]])
     out = run(capsys, "run", "ekf-02-tangent", "--out", str(tmp_path))
-    assert out.splitlines()[-1] == "Lesson 2 is done."
-    assert run(capsys, "where") == "Lesson 2 · 6 of 6 simulations run. Lesson 2 is done.\n"
-    assert "▶" not in run(capsys, "list")
+    assert out.splitlines()[-1] == f"Lesson 2 is done. {NEXT_LESSON3}"            # on to lesson 3, not back to 1
+    assert run(capsys, "where") == f"Lesson 2 · 6 of 6 simulations run. Lesson 2 is done. {NEXT_LESSON3}.\n"
+    assert "  ▶ ukf-02-icd-decode  " in run(capsys, "list")
     out = run(capsys, "run", "03-1d-loop", "--out", str(tmp_path))                 # a rerun moves nothing
     assert out.splitlines()[-1] == "Next: 01-fusion (fuse two measurements)"
+    assert run(capsys, "where") == f"Lesson 2 · 6 of 6 simulations run. Lesson 2 is done. {NEXT_LESSON3}.\n"
+    have_run(progress, LESSON3 + ["ekf-03-range-only", "03-1d-loop"] + LESSON2[2:])
+    out = run(capsys, "run", "ekf-02-tangent", "--out", str(tmp_path))
+    assert out.splitlines()[-1] == "Lesson 2 is done."                             # and lesson 3 was done already
     assert run(capsys, "where") == "Lesson 2 · 6 of 6 simulations run. Lesson 2 is done.\n"
-    have_run(progress, LESSON2 + LESSON1[1:])
+    assert "▶" not in run(capsys, "list")
+    have_run(progress, LESSON3 + LESSON2 + LESSON1[1:])
     out = run(capsys, "run", "01-fusion", "--out", str(tmp_path))
-    assert out.splitlines()[-1] == "Lesson 1 is done."                             # and lesson 2 was done already
+    assert out.splitlines()[-1] == "Lesson 1 is done."                             # and lessons 2 and 3 were done already
     assert run(capsys, "where") == "Lesson 1 · 7 of 7 simulations run. Lesson 1 is done.\n"
 
 
 def test_a_lesson_still_being_written_is_announced(progress, tmp_path, capsys, monkeypatch):
-    soon = registry.Lesson(3, ("UKF", "UKF"), ("https://example.com/3", "https://example.com/3-tr"), ())
+    soon = registry.Lesson(4, ("UKF, part 2", "UKF, 2. kısım"), ("https://example.com/4", "https://example.com/4-tr"), ())
     monkeypatch.setattr(registry, "LESSONS", registry.LESSONS + (soon,))
-    assert run(capsys, "list").splitlines()[-1] == "LESSON 3 · UKF (writing)"
-    assert run(capsys, "list", "--lang", "tr").splitlines()[-1] == "DERS 3 · UKF (yazılıyor)"
-    have_run(progress, LESSON2[1:])
-    out = run(capsys, "run", "ekf-02-tangent", "--out", str(tmp_path))
-    assert out.splitlines()[-1] == "Lesson 2 is done. Lesson 3 (UKF) is being written."
-    assert run(capsys, "where", "--lang", "tr") == ("Ders 2 · çalıştırılan simülasyon: 6 / 6. Ders 2 bitti. "
-                                                    "Ders 3 (UKF) yazılıyor.\n")
+    assert run(capsys, "list").splitlines()[-1] == "LESSON 4 · UKF, part 2 (writing)"
+    assert run(capsys, "list", "--lang", "tr").splitlines()[-1] == "DERS 4 · UKF, 2. kısım (yazılıyor)"
+    have_run(progress, LESSON3[1:])
+    out = run(capsys, "run", "ukf-02-icd-decode", "--out", str(tmp_path))
+    assert out.splitlines()[-1] == "Lesson 3 is done. Lesson 4 (UKF, part 2) is being written."
+    assert run(capsys, "where", "--lang", "tr") == ("Ders 3 · çalıştırılan simülasyon: 5 / 5. Ders 3 bitti. "
+                                                    "Ders 4 (UKF, 2. kısım) yazılıyor.\n")
 
 
 def test_progress_file_is_json_unique_and_survives_reruns(progress, tmp_path, capsys):
@@ -186,11 +201,14 @@ def test_run_writes_a_csv_of_the_table_and_a_png(progress, tmp_path, capsys):
 def test_run_prints_rounded_summary_numbers(progress, tmp_path, capsys):
     out = run(capsys, "run", "01-fusion", "--out", str(tmp_path))
     assert re.search(r"^\s+mean\s+21$", out, re.M) and re.search(r"^\s+var\s+0\.9$", out, re.M)
+    more = {"ekf-08-wrap": r"\s+(z_|raw|wrapped)",                         # its bearings print 4 decimals, see below
+            "ukf-02-icd-decode": r"\s+(az|el)",                             # angles and rates in rad, 4 decimals
+            "ukf-07-radar-update": r"\s+x_plus "}                           # 308.9049, see the lesson 3 README
     for sid in sims.SIMS:
         text = run(capsys, "run", sid, "--out", str(tmp_path))
         summary = text.split("\nwrote ")[0]
-        if sid == "ekf-08-wrap":                                             # its bearings print 4 decimals, see below
-            summary = "\n".join(line for line in summary.splitlines() if not re.match(r"\s+(z_|raw|wrapped)", line))
+        if sid in more:
+            summary = "\n".join(line for line in summary.splitlines() if not re.match(more[sid], line))
         for number in re.findall(r"\d+\.\d+", summary):                    # 3 decimals at most, two significant
             whole, decimals = number.split(".")                              # digits for a value under 0.01
             assert len(decimals) <= 3 or (whole == "0" and decimals.startswith("00")
@@ -206,6 +224,24 @@ def test_wrap_prints_bearings_that_subtract_to_the_printed_difference(progress, 
     assert round(value["raw"] + 2 * math.pi, 4) == value["wrapped"]
     out = run(capsys, "run", "ekf-08-wrap", "--lang", "tr", "--out", str(tmp_path))
     assert re.search(r"^\s+raw\s+-6,2545$", out, re.M)
+
+
+def test_a_hand_worked_run_prints_its_table_above_the_summary(progress, tmp_path, capsys):
+    out = run(capsys, "run", "ukf-02-icd-decode", "--out", str(tmp_path)).splitlines()
+    assert out[1] == "  field      bytes  raw               value             unit"
+    assert out[2] == "  sync       0-1    42330             0xA55A"                   # an empty last cell, no trailing blanks
+    assert "  az         16-19  439875013         0.6435            rad" in out
+    assert "  el_rate    26-27  -21               -0.0021           rad/s" in out
+    blank = out.index("")
+    assert blank == 15 and out[blank + 1] == "  az_deg            36.87"            # then a blank line and the summary
+    tr = run(capsys, "run", "ukf-02-icd-decode", "--lang", "tr", "--out", str(tmp_path))
+    assert "  az         16-19  439875013         0,6435            rad" in tr.splitlines()
+    out = run(capsys, "run", "ukf-05-sigma-points", "--out", str(tmp_path)).splitlines()
+    assert out[1:3] == ["  set       i  weight  x        y", "  1d        0  0.667   300"]    # None: an empty cell
+    rows = list(csv.DictReader((tmp_path / "ukf-05-sigma-points.csv").read_text().splitlines()))
+    assert len(rows) == 18 and rows[0]["y"] == "" and rows[3]["y"] == "400"                # the same table in the CSV
+    out = run(capsys, "run", "ekf-03-range-only", "--out", str(tmp_path)).splitlines()
+    assert out[1].startswith("  h ") and "" not in out                                     # lesson 2 prints no table
 
 
 def test_run_keeps_two_significant_digits_of_small_values(progress, tmp_path, capsys):
@@ -240,6 +276,8 @@ def test_run_options_reach_the_simulation(progress, tmp_path, capsys):
     assert re.search(r"^\s+q\s+0\.5$", out, re.M)
     out = run(capsys, "run", "ekf-03-range-only", "--sigma-r", "4", "--out", str(tmp_path))
     assert re.search(r"^\s+S\s+52$", out, re.M)                                 # 0.6² 100 + 4²
+    out = run(capsys, "run", "ukf-07-radar-update", "--sigma-r", "4", "--out", str(tmp_path))
+    assert re.search(r"^\s+R\s+16$", out, re.M) and re.search(r"^\s+ekf_S\s+52$", out, re.M)
 
 
 def test_run_ignored_options_are_named_on_stderr(progress, tmp_path, capsys):
@@ -362,7 +400,7 @@ def test_run_ends_with_the_essay_section_and_the_next_simulation(progress, tmp_p
 
 def test_run_next_is_the_same_as_where_and_the_last_run_says_lesson_two_is_done(progress, tmp_path, capsys):
     ids = list(sims.SIMS)
-    assert ids == LESSON1 + LESSON2
+    assert ids == LESSON1 + LESSON2 + LESSON3
     for i, sid in enumerate(ids):
         e = registry.entry(sid)
         lines = run(capsys, "run", sid, "--out", str(tmp_path)).splitlines()
@@ -370,9 +408,10 @@ def test_run_next_is_the_same_as_where_and_the_last_run_says_lesson_two_is_done(
                                 f"  {registry.lesson_of(sid).essay[0]}#{registry.anchor(e.heading)}"]
         if i < len(ids) - 1:
             nxt = f"Next: {ids[i + 1]} ({registry.entry(ids[i + 1]).title[0]})"
-            assert lines[-1] == (f"Lesson 1 is done. {nxt}" if sid == "14-nis" else nxt)
+            done = {"14-nis": "Lesson 1 is done. ", "ekf-09-consistency": "Lesson 2 is done. "}.get(sid, "")
+            assert lines[-1] == done + nxt
             assert run(capsys, "where").endswith(f" {lines[-1]}.\n")
-    assert lines[-1] == "Lesson 2 is done."
+    assert lines[-1] == "Lesson 3 is done."
 
 
 def test_turkish_run_points_to_the_turkish_section_and_says_sirada(progress, tmp_path, capsys):
@@ -387,15 +426,17 @@ def test_every_turkish_run_links_its_turkish_heading(e, progress, tmp_path, caps
     lines = run(capsys, "run", e.id, "--lang", "tr", "--out", str(tmp_path)).splitlines()
     i = lines.index(f"Yazıda: {e.heading_tr}")
     assert lines[i + 1] == f"  {registry.lesson_of(e.id).essay[1]}#{registry.anchor(e.heading_tr)}"
-    assert lines[i + 1].startswith(f"  {ESSAY}-tr#" if e.id in LESSON1 else f"  {ESSAY2}-tr#")
+    essay = ESSAY if e.id in LESSON1 else ESSAY2 if e.id in LESSON2 else ESSAY3
+    assert lines[i + 1].startswith(f"  {essay}-tr#")
 
 
 # --- Turkish -----------------------------------------------------------------------------
 
 def test_turkish_list_where_and_run(progress, tmp_path, capsys):
     lines = run(capsys, "list", "--lang", "tr").splitlines()
-    assert lines[0] == "DERS 1 · Kalman filtresi" and lines[8] == "DERS 2 · EKF"
-    assert lines[-1].endswith("ekf-09-consistency       teğet nerede yetmez: dört durum")
+    assert lines[0] == "DERS 1 · Kalman filtresi" and lines[8] == "DERS 2 · EKF" and lines[15] == "DERS 3 · UKF"
+    assert lines[14].endswith("ekf-09-consistency       teğet nerede yetmez: dört durum")
+    assert lines[-1].endswith("ukf-08-wide-belief       geniş bir inanç: EKF ile UKF ayrışıyor")
     assert lines[1].startswith("  ▶ 01-fusion") and lines[1].endswith("iki ölçümü birleştir")
     out = run(capsys, "run", "05-derivative-vs-filter", "--lang", "tr", "--out", str(tmp_path))
     assert "yazıldı" in out and "wrote" not in out
@@ -416,14 +457,16 @@ def test_turkish_and_english_figures_differ_but_share_a_file_name(progress, tmp_
 
 def test_registry_lists_exactly_the_simulations():
     assert [e.id for e in registry.entries()] == list(sims.SIMS)
-    assert [lesson.number for lesson in registry.LESSONS] == [1, 2]                # lesson 3 is not announced yet
+    assert [lesson.number for lesson in registry.LESSONS] == [1, 2, 3]
     assert [e.id for e in registry.LESSONS[0].entries] == LESSON1
     assert [e.id for e in registry.LESSONS[1].entries] == LESSON2 == list(sims2.SIMS)
+    assert [e.id for e in registry.LESSONS[2].entries] == LESSON3 == list(sims3.SIMS)
     assert registry.LESSONS[0].essay == (ESSAY, ESSAY + "-tr") and registry.LESSONS[1].essay == (ESSAY2, ESSAY2 + "-tr")
-    assert registry.LESSONS[1].name == ("EKF", "EKF")
+    assert registry.LESSONS[2].essay == (ESSAY3, ESSAY3 + "-tr")
+    assert registry.LESSONS[1].name == ("EKF", "EKF") and registry.LESSONS[2].name == ("UKF", "UKF")
     for e in registry.entries():
         assert e.title[0] and e.title[1] and e.title[0] != e.title[1]
-        assert registry.lesson_of(e.id).essay[0] == (ESSAY if e.id in LESSON1 else ESSAY2)
+        assert registry.lesson_of(e.id).essay[0] == (ESSAY if e.id in LESSON1 else ESSAY2 if e.id in LESSON2 else ESSAY3)
         assert set(e.options) <= {"q", "r", "gap", "seed", "sigma_r", "sigma_theta"}
 
 
@@ -442,6 +485,23 @@ def test_anchor_drops_turkish_letters_like_the_site():
     assert registry.anchor("5. Hız neden durumun içinde olmalı?") == "5-hz-neden-durumun-iinde-olmal"
     assert registry.anchor("13. Q ve R’yi ayarlamak") == "13-q-ve-ryi-ayarlamak"
     assert registry.anchor("14. Filtre dürüst mü? NIS testi") == "14-filtre-drst-m-nis-testi"
+    assert registry.anchor("3. Bir inanç eğriden geçince") == "3-bir-inan-eriden-geince"
+    assert registry.anchor("8. İnanç genişken") == "8-inan-geniken"
+
+
+def test_lesson_three_headings_and_anchors_are_the_essays():
+    """The lesson 3 essay is written to these headings; the anchors are what its links point to."""
+    got = [(e.heading, registry.anchor(e.heading), e.heading_tr, registry.anchor(e.heading_tr))
+           for e in registry.LESSONS[2].entries]
+    assert got == [
+        ("2. Reading an ICD", "2-reading-an-icd", "2. Bir ICD okumak", "2-bir-icd-okumak"),
+        ("3. A belief through a curve", "3-a-belief-through-a-curve", "3. Bir inanç eğriden geçince",
+         "3-bir-inan-eriden-geince"),
+        ("5. Sigma points", "5-sigma-points", "5. Sigma noktaları", "5-sigma-noktalar"),
+        ("7. One radar update by hand", "7-one-radar-update-by-hand", "7. Elle bir radar güncellemesi",
+         "7-elle-bir-radar-gncellemesi"),
+        ("8. When the belief is wide", "8-when-the-belief-is-wide", "8. İnanç genişken", "8-inan-geniken"),
+    ]
 
 
 def test_turkish_headings_have_the_english_section_numbers():
@@ -465,7 +525,8 @@ def test_declared_options_are_exactly_the_ones_that_change_the_result(sid):
 
 def test_readme_table_links_every_id_to_its_essay_section():
     readme = (ROOT / "README.md").read_text()
-    for lesson, heading in zip(registry.LESSONS, ("## Lesson 1: Kalman filter", "## Lesson 2: extended Kalman filter")):
+    for lesson, heading in zip(registry.LESSONS, ("## Lesson 1: Kalman filter", "## Lesson 2: extended Kalman filter",
+                                                  "## Lesson 3: unscented Kalman filter")):
         table = readme.split(heading + "\n")[1].split("\n## ")[0]
         for e in lesson.entries:
             row = next(line for line in table.splitlines() if line.startswith(f"| `{e.id}` |"))
@@ -494,7 +555,7 @@ def test_readme_commands_are_all_written_with_uv_run_and_the_progress_file_is_do
             assert (f"`{e.id}`" in said) == (name in e.options), (e.id, flag)
 
 
-LESSON_DIRS = {1: "lesson-01-kalman-filter", 2: "lesson-02-extended-kalman-filter"}
+LESSON_DIRS = {1: "lesson-01-kalman-filter", 2: "lesson-02-extended-kalman-filter", 3: "lesson-03-unscented-kalman-filter"}
 
 
 def test_lesson_readme_has_a_paragraph_and_a_command_per_id():
@@ -508,10 +569,10 @@ def test_lesson_readme_has_a_paragraph_and_a_command_per_id():
         assert f"]({folder}/README.md)" in readme
 
 
-@pytest.mark.parametrize("sid", LESSON2)
-def test_lesson_two_readme_quotes_what_the_cli_prints(sid, progress, tmp_path, capsys):
+@pytest.mark.parametrize("sid", LESSON2 + LESSON3)
+def test_lesson_readme_quotes_what_the_cli_prints(sid, progress, tmp_path, capsys):
     """Every `key value` the section of `sid` quotes is a line `fbh run <id>` prints, with the default options."""
-    text = (ROOT / LESSON_DIRS[2] / "README.md").read_text()
+    text = (ROOT / LESSON_DIRS[registry.lesson_of(sid).number] / "README.md").read_text()
     section = text.split(f"\n## {sid}: ")[1].split("\n## ")[0]
     printed = dict(re.findall(r"^  (\S+)\s+(.+)$", run(capsys, "run", sid, "--out", str(tmp_path)).split("\nwrote ")[0], re.M))
     quoted = [(key, value) for key, value in re.findall(r"`(\w+) ([^`]+)`", section) if key in printed]

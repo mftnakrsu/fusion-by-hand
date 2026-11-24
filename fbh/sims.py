@@ -3,13 +3,13 @@
 Every id in SIMS maps an Options to a Result (table, summary, plot). A simulation reads only the
 options it has a use for and ignores the others; None always means "the simulation's own default".
 The functions below it (velocity_learning, nis, ...) are the same runs with their raw numbers.
-SIMS holds the ids of both lessons, lesson 1's first; lesson 2's simulations live in sims2.py.
+SIMS holds the ids of every lesson, lesson 1's first; lesson 2's simulations live in sims2.py, lesson 3's in sims3.py.
 """
 from typing import Callable
 
 import numpy as np
 
-from . import scenarios, sims2
+from . import scenarios, sims2, sims3
 from .base import Options, OptionError, Result, _pick, _plain, _result
 from .kf import cv_model, fuse, predict, update
 
@@ -288,4 +288,5 @@ SIMS: dict[str, Callable[[Options], Result]] = {
     "13-q-r-tradeoff": _sim_tradeoff,
     "14-nis": _sim_nis,
     **sims2.SIMS,                           # lesson 2: ekf-02-tangent to ekf-09-consistency
+    **sims3.SIMS,                           # lesson 3: ukf-02-icd-decode to ukf-08-wide-belief
 }

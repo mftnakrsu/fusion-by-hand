@@ -96,6 +96,17 @@ def _fmt(value, lang: str, decimals: int = 3) -> str:
     return str(value)
 
 
+def _print_table(table: list[dict], lang: str, digits: dict) -> None:
+    """A short table on the terminal, above the summary: a header, columns two spaces apart, then a blank line.
+    Numbers print as in the summary; None is an empty cell, as in the CSV."""
+    cols = list(table[0])
+    cells = [cols] + [["" if row[c] is None else _fmt(row[c], lang, digits.get(c, 3)) for c in cols] for row in table]
+    widths = [max(len(line[j]) for line in cells) for j in range(len(cols))]
+    for line in cells:
+        print("  " + "  ".join(cell.ljust(w) for cell, w in zip(line, widths)).rstrip())
+    print()
+
+
 def _write_csv(table: list[dict], path: Path) -> None:
     """The table as CSV: floats to 12 significant digits (so 0.8999999999999998 reads 0.9), None as an empty cell."""
     cell = lambda v: f"{v:.12g}" if isinstance(v, float) else v
@@ -178,6 +189,8 @@ def cmd_run(args) -> None:
     progress.mark(entry.id)
 
     print(f"{entry.id} · {entry.title[i]}")
+    if result.show_table:
+        _print_table(result.table, args.lang, result.digits)
     width = max(len(key) for key in result.summary)
     for key, value in result.summary.items():
         print(f"  {key:<{width}}  {_fmt(value, args.lang, result.digits.get(key, 3))}")

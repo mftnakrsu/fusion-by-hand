@@ -24,7 +24,8 @@ class Result:
     table: list[dict]
     summary: dict
     plot: Callable[..., Path]               # plot(out_dir, lang=None) -> <out_dir>/<id>.png
-    digits: dict = field(default_factory=dict)   # summary keys the CLI prints with more than its usual 3 decimals
+    digits: dict = field(default_factory=dict)   # summary keys (or table columns) the CLI prints with more than 3 decimals
+    show_table: bool = False                # the CLI prints the table above the summary (a short one, worked by hand)
 
 
 class OptionError(ValueError):
@@ -48,7 +49,8 @@ def _plain(obj):
     return obj
 
 
-def _result(sid: str, data: dict, table: list[dict], summary: dict, opts: Options, digits: dict | None = None) -> Result:
+def _result(sid: str, data: dict, table: list[dict], summary: dict, opts: Options, digits: dict | None = None,
+            show_table: bool = False) -> Result:
     def draw(out_dir, lang=None):
         return plot.save(sid, data, Path(out_dir), lang or opts.lang or "en")
-    return Result(_plain(table), _plain(summary), draw, dict(digits or {}))
+    return Result(_plain(table), _plain(summary), draw, dict(digits or {}), show_table)
